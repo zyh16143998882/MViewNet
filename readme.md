@@ -35,6 +35,14 @@ index2point()函数
 
 修改get_depth_image()函数
 
-修改val规则 大幅提高val速度
+
+# 0318 Update
+
+将SpareNet的输入完全改为坐标图
+
+MViewNet的dec改为8个并行 render init那里改为只有一个render
+
+添加MViewPontNet
+
 
 

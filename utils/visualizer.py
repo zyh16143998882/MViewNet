@@ -14,17 +14,21 @@ from utils.p2i_utils import ComputeDepthMaps
 from cuda.chamfer_distance import ChamferDistance, ChamferDistanceMean
 
 VISUALIZER = False
+VISUALIZER_PRE = False
 VIS_PATH_PC_ALL = './output/exp2/pc_all/'
 VIS_PATH_PC = './output/exp2/pc/'
-VIS_PATH_GT = './output/exp2/gt/'
-REFINE = True
-if VISUALIZER == True:
+VIS_PATH_GT = './output/exp2/gt/'       # img
+VIS_PATH_PARTIAL = './output/exp2/partial/'
+REFINE = False
+if VISUALIZER_PRE == True:
     if not os.path.isdir(VIS_PATH_PC_ALL):
         os.makedirs(VIS_PATH_PC_ALL)
     if not os.path.isdir(VIS_PATH_PC):
         os.makedirs(VIS_PATH_PC)
     if not os.path.isdir(VIS_PATH_GT):
         os.makedirs(VIS_PATH_GT)
+    if not os.path.isdir(VIS_PATH_PARTIAL):
+        os.makedirs(VIS_PATH_PARTIAL)
 
 
 def get_ptcloud_img(ptcloud):

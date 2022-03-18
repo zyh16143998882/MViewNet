@@ -48,18 +48,13 @@ def renderer_init(cfg):
         renderer: torch.nn.module
     """
     # Create the differentiable renderer
-    renderer_gen = MviewComputeDepthMaps(
-        projection=cfg.RENDER.projection,
-        eyepos_scale=cfg.RENDER.eyepos,
-        image_size=cfg.RENDER.img_size,
-    ).float()
     renderer_dis = ComputeDepthMaps(
         projection=cfg.RENDER.projection,
         eyepos_scale=cfg.RENDER.eyepos,
         image_size=cfg.RENDER.img_size,
     ).float()
 
-    return renderer_gen, renderer_dis
+    return renderer_dis
 
 
 # netD初始化
@@ -127,6 +122,21 @@ def define_G(cfg):
 
         # from models.mvnet import MVNet
         network = MViewNetGenerator(
+            num_points=cfg.DATASET.n_outpoints,
+            bottleneck_size=4096,
+            n_primitives=cfg.NETWORK.n_primitives,
+            use_SElayer=cfg.NETWORK.use_selayer,
+            use_AdaIn=cfg.NETWORK.use_adain,
+            use_RecuRefine=cfg.NETWORK.use_recurefine,
+            encode=cfg.NETWORK.encode,
+            decode=cfg.NETWORK.decode,
+            hide_size=4096,
+        )
+    elif cfg.NETWORK.model_type == name.MODEL_MVIEWPOINTNET:
+        from models.sparenet_generator import MViewPointNetGenerator
+
+        # from models.mvnet import MVNet
+        network = MViewPointNetGenerator(
             num_points=cfg.DATASET.n_outpoints,
             bottleneck_size=4096,
             n_primitives=cfg.NETWORK.n_primitives,

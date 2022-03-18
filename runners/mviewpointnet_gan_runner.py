@@ -13,9 +13,13 @@ import cuda.emd.emd_module as emd
 from cuda.chamfer_distance import ChamferDistance, ChamferDistanceMean
 from runners.misc import AverageMeter
 from runners.base_runner import BaseRunner
+from utils.visualizer import VISUALIZER_PRE, get_ptcloud_img, VIS_PATH_GT, VIS_PATH_PC, VIS_PATH_PC_ALL, \
+    VIS_PATH_PARTIAL
+from PIL import Image
+from  torchvision import utils as vutils
 
 
-class mviewnetGANRunner(BaseRunner):
+class mviewpointnetGANRunner(BaseRunner):
     """Define the SpareNet GAN runner class"""
 
     def __init__(self, config, logger):
@@ -33,9 +37,9 @@ class mviewnetGANRunner(BaseRunner):
         self.criterionD = torch.nn.MSELoss()
 
     def build_models(self):
-        super().build_models()      # 这里是对netG的初始化
-        self.renderer_dis = renderer_init(self.config)      # 初始化渲染器
-        self.models_D, self.optimizers_D, self.lr_schedulers_D = discriminator_init(self.config)        # 初始化netD
+        super().build_models()  # 这里是对netG的初始化
+        self.renderer_dis = renderer_init(self.config)  # 初始化渲染器
+        self.models_D, self.optimizers_D, self.lr_schedulers_D = discriminator_init(self.config)  # 初始化netD
 
     def data_parallel(self):
         super().data_parallel()
@@ -72,9 +76,8 @@ class mviewnetGANRunner(BaseRunner):
             data[k] = v.float().to(self.gpu_ids[0])
         labels = torch.tensor(labels, dtype=torch.long).to(self.gpu_ids[0])
 
-        # 获取点云的gt和partial的深度图和3d坐标图
+        # 获取点云的gt和partial的深度图
         self.get_depth_image(data)
-        # self.real_imgs = data["mview"]
 
         # create GAN positive & negative labels
         _batch_size = data["partial_cloud"].size()[0]
@@ -131,7 +134,6 @@ class mviewnetGANRunner(BaseRunner):
 
         # 获取点云的gt和partial的深度图
         self.get_depth_image(data)
-        # self.real_imgs = data["mview"]
 
         if self.models.module.use_RecuRefine == True:
             _loss, refine_ptcloud, _, _, refine_loss, coarse_loss = self.completion(data)
@@ -142,18 +144,16 @@ class mviewnetGANRunner(BaseRunner):
         self.ptcloud = refine_ptcloud
 
     def completion_wo_recurefine(self, data, code):
-
         (
             coarse_ptcloud,
             middle_ptcloud,
             refine_ptcloud,
             expansion_penalty,
-        ) = self.models(data, self.input_imgs, self.input_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
+        ) = self.models(data, self.input_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
 
         if self.config.NETWORK.metric == "chamfer":
             coarse_loss = self.chamfer_dist_mean(coarse_ptcloud, data["gtcloud"]).mean()
             middle_loss = self.chamfer_dist_mean(middle_ptcloud, data["gtcloud"]).mean()
-            # refine_loss = self.chamfer_dist_mean(refine_ptcloud, data["gtcloud"]).mean()
 
         elif self.config.NETWORK.metric == "emd":
             emd_coarse, _ = self.emd_dist(
@@ -162,17 +162,12 @@ class mviewnetGANRunner(BaseRunner):
             emd_middle, _ = self.emd_dist(
                 middle_ptcloud, data["gtcloud"], eps=0.005, iters=50
             )
-            # emd_refine, _ = self.emd_dist(
-            #     refine_ptcloud, data["gtcloud"], eps=0.005, iters=50
-            # )
             coarse_loss = torch.sqrt(emd_coarse).mean(1).mean()
-            # refine_loss = torch.sqrt(emd_refine).mean(1).mean()
             middle_loss = torch.sqrt(emd_middle).mean(1).mean()
 
         else:
             raise Exception("unknown training metric")
 
-        # _loss = coarse_loss + middle_loss + refine_loss + expansion_penalty.mean() * 0.1
         _loss = coarse_loss + middle_loss + expansion_penalty.mean() * 0.1
 
         if self.config.NETWORK.use_consist_loss:
@@ -195,6 +190,7 @@ class mviewnetGANRunner(BaseRunner):
             data: tensor
                 -partical_cloud: b x npoints1 x num_dims
                 -gtcloud: b x npoints2 x num_dims
+
         outputs:
             _loss: float32
             refine_ptcloud: b x npoints2 x num_dims
@@ -208,7 +204,7 @@ class mviewnetGANRunner(BaseRunner):
             middle_ptcloud,
             refine_ptcloud,
             expansion_penalty,
-        ) = self.models(data, self.input_imgs, self.input_point_imgs)
+        ) = self.models(data, self.input_point_imgs)
 
         if self.config.NETWORK.metric == "chamfer":
             coarse_loss = self.chamfer_dist_mean(coarse_ptcloud, data["gtcloud"]).mean()
@@ -249,25 +245,28 @@ class mviewnetGANRunner(BaseRunner):
         )
 
     def get_depth_image(self, data):
-        input_render_imgs_dict = {}  # 渲染的一个点云partial的所有img
-        input_render_point_imgs_dict = {}  # 渲染的一个点云partial的所有img
+        real_render_point_imgs_dict = {}
+        input_render_point_imgs_dict = {}
         random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
         random_view_ids = list(range(0, N_VIEWS_PREDEFINED, 1))  # 随机视角ID  从0到7
 
         for _view_id in random_view_ids:
-            input_render_imgs_dict[_view_id], input_index = self.renderer_dis(data["partial_cloud"], view_id=_view_id, radius_list=[random_radius])
+            _, input_index = self.renderer_dis(data["partial_cloud"], view_id=_view_id, radius_list=[random_radius])
             input_render_point_imgs_dict[_view_id] = self.index2point(input_index,data["partial_cloud"])
 
+            _, real_index = self.renderer_dis(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
+            real_render_point_imgs_dict[_view_id] = self.index2point(real_index, data["gtcloud"])
+
         _view_id = random_view_ids[0]
-        self.input_imgs = input_render_imgs_dict[_view_id]  # partial的视图
         self.input_point_imgs = input_render_point_imgs_dict[_view_id]
+        self.real_point_imgs = real_render_point_imgs_dict[_view_id]
         for _index in range(1, len(random_view_ids)):  # 对每个点云将8个视图concat起来，最终real_imgs等变为2*8*256*256
             _view_id = random_view_ids[_index]
-            self.input_imgs = torch.cat(
-                (self.input_imgs, input_render_imgs_dict[_view_id]), dim=1
-            ).to(self.gpu_ids[0])
             self.input_point_imgs = torch.cat(
                 (self.input_point_imgs, input_render_point_imgs_dict[_view_id]), dim=1
+            ).to(self.gpu_ids[0])
+            self.real_point_imgs = torch.cat(
+                (self.real_point_imgs, real_render_point_imgs_dict[_view_id]), dim=1
             ).to(self.gpu_ids[0])
 
     def index2point(self, index_img, data):
@@ -294,7 +293,6 @@ class mviewnetGANRunner(BaseRunner):
         data_temp = data[i,:,:]
 
         temp = temp % 3000
-        # temp = temp * mask_temp
 
         size = temp.size()
         temp = temp.contiguous().view(size[0] * size[1], size[2]).long()
@@ -303,6 +301,66 @@ class mviewnetGANRunner(BaseRunner):
         temp = temp.contiguous().view(1,temp.size()[0],temp.size()[1],temp.size()[2])
         return temp
 
+    def get_view_points_image(self, data, code="default"):
+        input_render_imgs_dict = {}  # 渲染的一个点云partial的所有img
+        input_render_point_imgs_dict = {}  # 渲染的一个点云partial的所有img
+        random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
+        random_view_ids = list(range(0, N_VIEWS_PREDEFINED_GEN, 1))  # 随机视角ID  从0到7
+
+        for _view_id in random_view_ids:
+            input_render_imgs_dict[_view_id], input_index = self.renderer_gen(data["partial_cloud"], view_id=_view_id, radius_list=[random_radius])
+            input_render_point_imgs_dict[_view_id] = self.index2point_singleview(input_index, data["partial_cloud"])
+            if VISUALIZER_PRE == True:
+                img = input_render_imgs_dict[_view_id]
+                temp_pc = input_render_point_imgs_dict[_view_id][0,:,:,:]
+                img_te = get_ptcloud_img(temp_pc.cpu())               # temp_pc torch.Size([2, 3, 512])
+                img_te = Image.fromarray(img_te)
+                img_te.save(VIS_PATH_PC+'{}_{}.jpg'.format(str(code[0]), str(_view_id)))
+                vutils.save_image(img[0, :, :, :], VIS_PATH_GT+'{}_{}.jpg'.format(str(code[0]), str(_view_id)),
+                                  normalize=True)         # torch.Size([1, 256, 256])
+                self.save_pc8view(temp_pc.view(temp_pc.size()[0],temp_pc.size()[2],temp_pc.size()[1]),code[0]+"_"+str(_view_id))
+
+    def index2point_singleview(self, index_img, data):
+        # for循环解决多个batch的问题
+        # temp解决index的shape的问题
+        # mask解决index值为-1的问题
+        size = index_img.size()
+        mask = (index_img != -1)
+        index_img = index_img * mask        # 含0的index数组而非之前的含的是-1
+        index_img = index_img.contiguous().view(size[0], size[2], size[3])                 # torch.Size([1, 256, 256, 1])
+        index_img = index_img.contiguous().view(size[0], size[2] * size[3])
+
+        res = self.index2point_perchannel_singleview(index_img, mask, data, 0)
+        for i in range(1,size[0]):
+            res = torch.cat((res, self.index2point_perchannel_singleview(index_img, mask, data, i)), dim=0)
+
+        return res.contiguous().view(res.size()[0],1,res.size()[2],res.size()[1])
+
+    def index2point_perchannel_singleview(self,index_img,mask,data,i):
+        temp = index_img[i,:]
+        mask_temp = mask[i,:,:,:]
+        data_temp = data[i,:,:]
+
+        temp = temp % 3000
+
+        out_index = torch.unique(temp)[1:]        # 获得所有非0的
+        out_index = out_index.view(out_index.size()[0],1).expand(out_index.size()[0], 3).long()
+
+        temp = torch.gather(data_temp, 0, out_index)
+
+        return temp.view(1,temp.size()[0],temp.size()[1])
+
+    def save_pc8view(self,pc_data,code):
+        input_render_imgs_dict = {}
+        random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
+        random_view_ids = list(range(0, N_VIEWS_PREDEFINED, 1))  # 随机视角ID  从0到7
+
+        for _view_id in random_view_ids:
+            # get real_imgs, gen_imgs and input_render_imgs
+            temp,_ = self.renderer_dis(
+                pc_data, view_id=_view_id, radius_list=[random_radius]
+            )
+            vutils.save_image(temp, VIS_PATH_PC_ALL+'{}_{}.jpg'.format(str(code), str(_view_id)), normalize=True)
 
     # 核心代码
     def discriminator_backward(self, data, labels, rendered_ptcloud):
@@ -313,6 +371,7 @@ class mviewnetGANRunner(BaseRunner):
                 -gtcloud: b x npoints2 x num_dims
             labels: tensor
             rendered_ptcloud: b x npoints2 x num_dims
+
         outputs:
             input_imgs: b x views x [img_size, img_size]
             fake_imgs: b x views x [img_size, img_size]
@@ -332,12 +391,21 @@ class mviewnetGANRunner(BaseRunner):
             real_render_imgs_dict[_view_id],_ = self.renderer_dis(
                 data["gtcloud"], view_id=_view_id, radius_list=[random_radius]
             )
-            gen_render_imgs_dict[_view_id],_ = self.renderer_dis(
+            gen_render_imgs_dict[_view_id], _ = self.renderer_dis(
                 rendered_ptcloud, view_id=_view_id, radius_list=[random_radius]
             )
             input_render_imgs_dict[_view_id],_ = self.renderer_dis(
                 data["partial_cloud"], view_id=_view_id, radius_list=[random_radius]
             )
+            # real_render_imgs_dict[_view_id] = self.renderer_dis(
+            #     data["gtcloud"], view_id=_view_id, radius_list=[random_radius]
+            # )
+            # gen_render_imgs_dict[_view_id] = self.renderer_dis(
+            #     rendered_ptcloud, view_id=_view_id, radius_list=[random_radius]
+            # )
+            # input_render_imgs_dict[_view_id] = self.renderer_dis(
+            #     data["partial_cloud"], view_id=_view_id, radius_list=[random_radius]
+            # )
 
         _view_id = random_view_ids[0]
         self.real_imgs = real_render_imgs_dict[_view_id]    # 第0个2*1*256*256
@@ -391,6 +459,7 @@ class mviewnetGANRunner(BaseRunner):
             fake_imgs: b x views x [img_size, img_size]
             real_imgs: b x views x [img_size, img_size]
             rec_loss: float
+
         outputs:
             errG: float32
             errG_D: float32
