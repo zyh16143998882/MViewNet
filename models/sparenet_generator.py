@@ -14,6 +14,7 @@ from PIL import Image
 
 
 # 生成器
+from cuda.pointnet2 import pointnet2_utils
 from models.unet import UnetEncoder, UnetGanEncoder, MViewEncoder, EasyUnetGenerator
 from utils.visualizer import get_ptcloud_img, VISUALIZER
 
@@ -165,8 +166,22 @@ class MViewPointNetGenerator(nn.Module):
         partial = partial_x  # [batch_size, 3, in_points]
 
         # decode
-        fake_pointmap = self.decoder(point_imgs, code)                       # 用1024维特征使用风格解码器申城粗略点云 torch.Size([2, 3, 16384])
-        return fake_pointmap
+        outs,res_fake= self.decoder(point_imgs, code)                         # 这里的outs torch.Size([2, 3, 131072])
+
+        outs = pointnet2_utils.gather_operation(outs.transpose(1, 2).contiguous(), pointnet2_utils.furthest_point_sample(outs, 16384))      # 这里的outs torch.Size([2, 3, 16384])
+        coarse = outs.transpose(1,2).contiguous()  # [batch_size, out_points, 3]   # 再转置回来，contiguous()操作往往和转置相搭配 torch.Size([2, 16384, 3])
+
+        # refine first time
+        middle, loss_mst = self.refine(outs, partial, coarse)  # 部分点云和粗略点云做第一次微调，得到微调出的点云Yr1和其微调loss
+
+        if self.use_RecuRefine == True:
+            # refine second time
+            outs_2 = middle.transpose(1, 2).contiguous()
+            refine, _ = self.refine(outs_2, partial, middle)  # Yr1和部分点云做微调得到最终的生成结果Yr2即Y
+
+            return coarse, middle, refine, loss_mst, res_fake  # 返回粗略点云，第一次微调点云，最终点云以及第一次微调loss
+        else:
+            return coarse, middle, None, loss_mst, res_fake
 
 
 class MViewNetGenerator(nn.Module):
@@ -656,6 +671,7 @@ class MViewPointNetDecode(nn.Module):
         self.n_primitives = n_primitives
         self.bottleneck_size = bottleneck_size
         self.decode = decode
+        self.criterionL1_loss = torch.nn.L1Loss()
         # 这里share的意思是那32个生成粗略点云的网络是用的同一个网络
         # 我这里修改一下，原本是32个生成有512个粗略点的点云生成网络。改成8个生成2048个粗略点的点云生成网络
 
@@ -685,16 +701,21 @@ class MViewPointNetDecode(nn.Module):
         )
 
     def forward(self, point_imgs, code="default"):
-        point_img = point_imgs[:, 0, :, :, :]  # torch.Size([8, 3, 256, 256])
+        point_img = point_imgs[:, 0, :, :, :]
         fake_pointmap, _ = self.unet(point_img)
-        for i in range(1,self.n_primitives):
-            point_img = point_imgs[:, i, :, :, :]  # torch.Size([8, 3, 256, 256])
-            fake_pointmap_temp, x = self.unet(point_img)
-            fake_pointmap = torch.cat((fake_pointmap, fake_pointmap_temp), dim=1)
+        res_fake = fake_pointmap
+        outs = fake_pointmap.view(fake_pointmap.size()[0], fake_pointmap.size()[3] * fake_pointmap.size()[4],
+                                           fake_pointmap.size()[2])
+        for i in range(1, self.n_primitives):
+            point_img = point_imgs[:, i, :, :, :]
+            fake_pointmap, _ = self.unet(point_img)
+            res_fake = torch.cat((res_fake, fake_pointmap), dim=1)
+            outs_temp = fake_pointmap.view(fake_pointmap.size()[0],
+                                               fake_pointmap.size()[3] * fake_pointmap.size()[4],
+                                               fake_pointmap.size()[2])
+            outs = torch.cat((outs, outs_temp), dim=1)
+        return outs, res_fake
 
-
-
-        return fake_pointmap
 
 class MViewNetDecode(nn.Module):
     """

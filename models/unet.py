@@ -197,19 +197,16 @@ class EasyUnetGenerator(nn.Module):
         self.d3_c = spectral_norm(nn.ConvTranspose2d(ngf*8*2, ngf*8, kernel_size=4, stride=2, padding=1), use_spectral_norm)
         self.d3_norm = norm_layer(ngf*8)
 
-        self.d4_c = spectral_norm(nn.ConvTranspose2d(ngf*8*2, ngf*8, kernel_size=4, stride=2, padding=1), use_spectral_norm)
-        self.d4_norm = norm_layer(ngf*8)
+        self.d4_c = spectral_norm(nn.ConvTranspose2d(ngf*8*2, ngf*4, kernel_size=4, stride=2, padding=1), use_spectral_norm)
+        self.d4_norm = norm_layer(ngf*4)
 
-        self.d5_c = spectral_norm(nn.ConvTranspose2d(ngf*8*2, ngf*4, kernel_size=4, stride=2, padding=1), use_spectral_norm)
-        self.d5_norm = norm_layer(ngf*4)
+        self.d5_c = spectral_norm(nn.ConvTranspose2d(ngf*4*2, ngf*2, kernel_size=4, stride=2, padding=1), use_spectral_norm)
+        self.d5_norm = norm_layer(ngf*2)
 
-        self.d6_c = spectral_norm(nn.ConvTranspose2d(ngf*4*2, ngf*2, kernel_size=4, stride=2, padding=1), use_spectral_norm)
-        self.d6_norm = norm_layer(ngf*2)
+        self.d6_c = spectral_norm(nn.ConvTranspose2d(ngf*2*2, ngf, kernel_size=4, stride=2, padding=1), use_spectral_norm)
+        self.d6_norm = norm_layer(ngf)
 
-        self.d7_c = spectral_norm(nn.ConvTranspose2d(ngf*2*2, ngf, kernel_size=4, stride=2, padding=1), use_spectral_norm)
-        self.d7_norm = norm_layer(ngf)
-
-        self.d8_c = spectral_norm(nn.ConvTranspose2d(ngf*2, output_nc, kernel_size=4, stride=2, padding=1), use_spectral_norm)
+        self.d7_c = spectral_norm(nn.ConvTranspose2d(ngf*2, output_nc, kernel_size=4, stride=2, padding=1), use_spectral_norm)
 
 
     # In this case, we have very flexible unet construction mode.
@@ -222,24 +219,18 @@ class EasyUnetGenerator(nn.Module):
         e4 = self.e4_norm(self.e4_c(F.leaky_relu_(e3, negative_slope=0.2)))
         e5 = self.e5_norm(self.e5_c(F.leaky_relu_(e4, negative_slope=0.2)))
         e6 = self.e6_norm(self.e6_c(F.leaky_relu_(e5, negative_slope=0.2)))
-        e7 = self.e7_norm(self.e7_c(F.leaky_relu_(e6, negative_slope=0.2)))
-        # No norm on the inner_most layer
-        e8 = self.e8_c(F.leaky_relu_(e7, negative_slope=0.2))
+        e7 = self.e7_c(F.leaky_relu_(e6, negative_slope=0.2))
 
         # Decoder
-        d1 = self.d1_norm(self.d1_c(F.relu_(e8)))
-        d2 = self.d2_norm(self.d2_c(F.relu_(torch.cat([d1, e7], dim=1))))
-        d3 = self.d3_norm(self.d3_c(F.relu_(torch.cat([d2, e6], dim=1))))
-        d4 = self.d4_norm(self.d4_c(F.relu_(torch.cat([d3, e5], dim=1))))
-        d5 = self.d5_norm(self.d5_c(F.relu_(torch.cat([d4, e4], dim=1))))
-        d6 = self.d6_norm(self.d6_c(F.relu_(torch.cat([d5, e3], dim=1))))
-        d7 = self.d7_norm(self.d7_c(F.relu_(torch.cat([d6, e2], dim=1))))
-        # No norm on the last layer
-        d8 = self.d8_c(F.relu_(torch.cat([d7, e1], 1)))
+        d1 = self.d1_norm(self.d1_c(F.relu_(e7)))
+        d2 = self.d2_norm(self.d2_c(F.relu_(torch.cat([d1, e6], dim=1))))
+        d3 = self.d3_norm(self.d3_c(F.relu_(torch.cat([d2, e5], dim=1))))
+        d4 = self.d4_norm(self.d4_c(F.relu_(torch.cat([d3, e4], dim=1))))
+        d5 = self.d5_norm(self.d5_c(F.relu_(torch.cat([d4, e3], dim=1))))
+        d6 = self.d6_norm(self.d6_c(F.relu_(torch.cat([d5, e2], dim=1))))
+        d7 = self.d7_c(F.relu_(torch.cat([d6, e1], dim=1)))
 
-        e7 = torch.tanh(e7)
-        d8 = torch.tanh(d8)
-
-        d8 = d8.contiguous().view(d8.size()[0], 1, d8.size()[1], d8.size()[2], d8.size()[3])
-
-        return d8, e7
+        e6 = torch.tanh(e6)
+        d7 = torch.tanh(d7)
+        d7 = d7.view(d7.size()[0],1,d7.size()[1],d7.size()[2],d7.size()[3])
+        return d7, e6

@@ -1,0 +1,10 @@
+# ninja log v5
+1	10427	1647612478547399328	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/interpolate_gpu.o	33bd1edcb5467d3e
+0	10457	1647612478575399103	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/ball_query_gpu.o	a1e3fc871de39c8d
+1	10592	1647612478711397998	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/group_points_gpu.o	85070490ed1f051a
+1	11021	1647612479139394529	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/sampling_gpu.o	63883275d7e5b129
+0	15796	1647612483907355855	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/pointnet2_api.o	d832b23db4a072c8
+3	4132	1647613078243827281	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/interpolate.o	dd183efb5db7a90b
+3	4138	1647613078247827229	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/group_points.o	61fa2d84faeec4d4
+3	4158	1647613078271826919	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/sampling.o	1415be94af439bc6
+3	4311	1647613152434887239	/data/zhayaohua/project/pccomplection/MViewNet/cuda/pointnet2/build/temp.linux-x86_64-3.7/src/ball_query.o	1b4fc11284a60577

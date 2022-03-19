@@ -28,7 +28,7 @@ NETWORK:
   use_consist_loss: true
 
 RENDER:
-  img_size: 256
+  img_size: 128
   radius_list: 
     - 5.0
     - 7.0

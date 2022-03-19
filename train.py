@@ -13,7 +13,7 @@ def get_args_from_command_line():
     parser = argparse.ArgumentParser(description="The argument parser of R2Net runner")
 
     # choose model
-    parser.add_argument("--model", type=str, default="sparenet", help="sparenet, pcf2dnet, mviewnet, mviewpointnet")
+    parser.add_argument("--model", type=str, default="mviewpointnet", help="sparenet, pcf2dnet, mviewnet, mviewpointnet")
 
     # choose train mode
     parser.add_argument("--gan", dest="gan", help="use gan", action="store_true", default=True)

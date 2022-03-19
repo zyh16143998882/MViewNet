@@ -61,6 +61,7 @@ class mviewpointnetGANRunner(BaseRunner):
         self.emd_dist = torch.nn.DataParallel(
             emd.emdModule().to(self.gpu_ids[0]), device_ids=self.gpu_ids
         )
+        self.criterionL1_loss = torch.nn.L1Loss()
 
     def build_val_loss(self):
         # Set up loss functions
@@ -149,6 +150,7 @@ class mviewpointnetGANRunner(BaseRunner):
             middle_ptcloud,
             refine_ptcloud,
             expansion_penalty,
+            res_fake,
         ) = self.models(data, self.input_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
 
         if self.config.NETWORK.metric == "chamfer":
@@ -168,7 +170,9 @@ class mviewpointnetGANRunner(BaseRunner):
         else:
             raise Exception("unknown training metric")
 
-        _loss = coarse_loss + middle_loss + expansion_penalty.mean() * 0.1
+        rec_l1 = self.criterionL1_loss(res_fake,self.real_point_imgs)
+
+        _loss = coarse_loss + middle_loss + expansion_penalty.mean() * 0.1 + rec_l1
 
         if self.config.NETWORK.use_consist_loss:
             dist1, _ = self.chamfer_dist(middle_ptcloud, data["gtcloud"])
@@ -204,6 +208,7 @@ class mviewpointnetGANRunner(BaseRunner):
             middle_ptcloud,
             refine_ptcloud,
             expansion_penalty,
+            res_fake,
         ) = self.models(data, self.input_point_imgs)
 
         if self.config.NETWORK.metric == "chamfer":
@@ -227,8 +232,8 @@ class mviewpointnetGANRunner(BaseRunner):
 
         else:
             raise Exception("unknown training metric")
-
-        _loss = coarse_loss + middle_loss + refine_loss + expansion_penalty.mean() * 0.1
+        rec_l1 = self.criterionL1_loss(res_fake, self.real_point_imgs)
+        _loss = coarse_loss + middle_loss + refine_loss + expansion_penalty.mean() * 0.1 + rec_l1
 
         if self.config.NETWORK.use_consist_loss:
             dist1, _ = self.chamfer_dist(refine_ptcloud, data["gtcloud"])
@@ -247,6 +252,7 @@ class mviewpointnetGANRunner(BaseRunner):
     def get_depth_image(self, data):
         real_render_point_imgs_dict = {}
         input_render_point_imgs_dict = {}
+        real_render_single_point_imgs_dict = {}
         random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
         random_view_ids = list(range(0, N_VIEWS_PREDEFINED, 1))  # 随机视角ID  从0到7
 
@@ -330,6 +336,7 @@ class mviewpointnetGANRunner(BaseRunner):
         index_img = index_img.contiguous().view(size[0], size[2], size[3])                 # torch.Size([1, 256, 256, 1])
         index_img = index_img.contiguous().view(size[0], size[2] * size[3])
 
+        # i是用来分batch来做的
         res = self.index2point_perchannel_singleview(index_img, mask, data, 0)
         for i in range(1,size[0]):
             res = torch.cat((res, self.index2point_perchannel_singleview(index_img, mask, data, i)), dim=0)

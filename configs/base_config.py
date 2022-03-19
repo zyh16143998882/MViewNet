@@ -55,7 +55,7 @@ __C.APEX.level = "O1"
 
 # RENDER
 __C.RENDER = edict()
-__C.RENDER.img_size = 256
+__C.RENDER.img_size = 128
 __C.RENDER.radius_list = [
     5.0,
     7.0,
