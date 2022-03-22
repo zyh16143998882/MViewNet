@@ -87,19 +87,12 @@ class SpareNetGenerator(nn.Module):
 
         # decode
         outs = self.decoder(style, point_imgs, code)                       # 用1024维特征使用风格解码器申城粗略点云 torch.Size([2, 3, 16384])
-        if VISUALIZER == True:
-            img_te = get_ptcloud_img(outs.cpu())
-            img_te = Image.fromarray(img_te)
-            img_te.save('./output/cartest/pc_all/{}_0.jpg'.format(str(code[0])))
+
         coarse = outs.transpose(1, 2).contiguous()  # [batch_size, out_points, 3]   # 再转置回来，contiguous()操作往往和转置相搭配 torch.Size([2, 16384, 3])
 
 
         # refine first time
         middle, loss_mst = self.refine(outs, partial, coarse)       # 部分点云和粗略点云做第一次微调，得到微调出的点云Yr1和其微调loss
-        if VISUALIZER == True:
-            img_te = get_ptcloud_img(middle.transpose(2, 1).contiguous().cpu())
-            img_te = Image.fromarray(img_te)
-            img_te.save('./output/cartest/pc_all/{}_1.jpg'.format(str(code[0])))
 
         if self.use_RecuRefine == True:
             # refine second time
@@ -741,21 +734,10 @@ class SpareNetDecode(nn.Module):
         adain_params = self.mlp(style)
         for i in range(self.n_primitives):
             point_img = point_imgs[:, i, :, :, :]  # torch.Size([8, 3, 256, 256])
-            # 这里的regular_grid应该改为对应的深度图 size为batch*1*256*256
-            # 将输入batch*1*256*256变为batch*512*1*1,再将batch*512*1*1变为batch*1*512作为dec的输入
+            dec_input = self.unet_encoder(point_img)
+            dec_input = torch.flatten(((dec_input - 0.5) * 2).contiguous(),start_dim=2,end_dim=3).permute(0, 2, 1)
+            temp_pc = self.decoder[i](dec_input, adain_params)
 
-            x = self.unet_encoder(point_img)
-            x = x.view(x.size(0), x.size(1), x.size(2) * x.size(3))
-            # x每个元素的取值由于输出时使用sigmoid进行激活，变为[0,1]之间，所以这里要将[0,1]变为[-1,1]
-            x = ((x - 0.5) * 2).contiguous()
-            # 之前x是torch.Size([2, 2048, 1, 1])需要变为torch.Size([2, 1, 512])
-            temp_pc = self.decoder[i](x.view(x.size(0), x.size(2), x.size(1)), adain_params)
-            # 在这里进行每个点云的可视化
-            if VISUALIZER == True:
-                img_te = get_ptcloud_img(temp_pc.cpu())
-                img_te = Image.fromarray(img_te)
-                img_te.save('./output/cartest/pc/{}_{}.jpg'.format(str(code[0]), str(i)))
-                # vutils.save_image(img[0, :, :, :], './output/cartest/gt/{}_{}.jpg'.format(str(code[0]), str(i)), normalize=True)
             outs.append(temp_pc)  # 将整个decoder的输入torch.Size([2, 2, 512])输入到第i个decoder中。主要在self.decoder中进行处理
 
         return torch.cat(outs, 2).contiguous()
@@ -1238,7 +1220,7 @@ class StyleBasedAdaIn(nn.Module):
         self.bottleneck_size = bottleneck_size
         self.input_dim = input_dim
         self.style_dim = style_dim
-        self.dec = MViewDecoder(
+        self.dec = GridDecoder(
             self.input_dim, self.bottleneck_size, use_SElayer=use_SElayer
         )
 

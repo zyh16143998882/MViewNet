@@ -8,13 +8,13 @@ import logging
 from time import time
 import utils.misc as um
 from utils.p2i_utils import N_VIEWS_PREDEFINED, N_VIEWS_PREDEFINED_GEN
-from utils.model_init import discriminator_init, renderer_init
+from utils.model_init import discriminator_init, renderer_init, renderer_init2
 import cuda.emd.emd_module as emd
 from cuda.chamfer_distance import ChamferDistance, ChamferDistanceMean
 from runners.misc import AverageMeter
 from runners.base_runner import BaseRunner
 from utils.visualizer import VISUALIZER_PRE, get_ptcloud_img, VIS_PATH_GT, VIS_PATH_PC, VIS_PATH_PC_ALL, \
-    VIS_PATH_PARTIAL
+    VIS_PATH_PARTIAL, VIS_INPUT_PATH_POINT, VIS_REAL_PATH_POINT
 from PIL import Image
 from  torchvision import utils as vutils
 
@@ -38,7 +38,7 @@ class sparenetGANRunner(BaseRunner):
 
     def build_models(self):
         super().build_models()  # 这里是对netG的初始化
-        self.renderer_dis = renderer_init(self.config)  # 初始化渲染器
+        self.renderer_dis, self.renderer_gen = renderer_init2(self.config)  # 初始化渲染器
         self.models_D, self.optimizers_D, self.lr_schedulers_D = discriminator_init(self.config)  # 初始化netD
 
     def data_parallel(self):
@@ -48,6 +48,9 @@ class sparenetGANRunner(BaseRunner):
         )
         self.renderer_dis = torch.nn.DataParallel(
             self.renderer_dis.to(self.gpu_ids[0]), device_ids=self.gpu_ids
+        )
+        self.renderer_gen = torch.nn.DataParallel(
+            self.renderer_gen.to(self.gpu_ids[0]), device_ids=self.gpu_ids
         )
 
     def build_train_loss(self):
@@ -77,7 +80,7 @@ class sparenetGANRunner(BaseRunner):
         labels = torch.tensor(labels, dtype=torch.long).to(self.gpu_ids[0])
 
         # 获取点云的gt和partial的深度图
-        self.get_depth_image(data)
+        self.get_depth_image(data, code)
 
         # create GAN positive & negative labels
         _batch_size = data["partial_cloud"].size()[0]
@@ -244,24 +247,45 @@ class sparenetGANRunner(BaseRunner):
             coarse_loss,
         )
 
-    def get_depth_image(self, data):
+    def get_depth_image(self, data, code="default"):
         real_render_point_imgs_dict = {}
         input_render_point_imgs_dict = {}
         random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
-        random_view_ids = list(range(0, N_VIEWS_PREDEFINED, 1))  # 随机视角ID  从0到7
+        random_view_ids = list(range(0, N_VIEWS_PREDEFINED_GEN, 1))  # 随机视角ID  从0到7
 
         for _view_id in random_view_ids:
-            # _, input_index = self.renderer_dis(data["partial_cloud"], view_id=_view_id, radius_list=[random_radius])
-            # input_render_point_imgs_dict[_view_id] = self.index2point(input_index,data["partial_cloud"])
+            partial_img, input_index = self.renderer_gen(data["partial_cloud"], view_id=_view_id,
+                                                         radius_list=[random_radius])
+            partial_mask = (partial_img != 0)
+            input_render_point_imgs_dict[_view_id] = self.index2point(input_index, data["partial_cloud"], partial_mask)
 
-            _, real_index = self.renderer_dis(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
-            real_render_point_imgs_dict[_view_id] = self.index2point(real_index, data["gtcloud"])
+            gt_img, real_index = self.renderer_gen(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
+            gt_mask = (gt_img != 0)
+            real_render_point_imgs_dict[_view_id] = self.index2point(real_index, data["gtcloud"], gt_mask)
+
+            if VISUALIZER_PRE == True:
+                img1 = input_render_point_imgs_dict[_view_id]
+                img2 = real_render_point_imgs_dict[_view_id]
+                img3 = partial_img
+                img4 = gt_img
+                for i in range(img4.size()[0]):
+                    vutils.save_image(img1[i, 0, :, :, :],
+                                      VIS_INPUT_PATH_POINT + '{}_{}.jpg'.format(str(code[i]), str(_view_id)),
+                                      normalize=True)
+                    vutils.save_image(img2[i, 0, :, :, :],
+                                      VIS_REAL_PATH_POINT + '{}_{}.jpg'.format(str(code[i]), str(_view_id)),
+                                      normalize=True)  # torch.Size([1, 256, 256])
+                    vutils.save_image(img3[i, :, :, :],
+                                      VIS_PATH_PARTIAL + '{}_{}.jpg'.format(str(code[i]), str(_view_id)),
+                                      normalize=True)
+                    vutils.save_image(img4[i, :, :, :], VIS_PATH_GT + '{}_{}.jpg'.format(str(code[i]), str(_view_id)),
+                                      normalize=True)
 
         _view_id = random_view_ids[0]
-        # self.input_point_imgs = input_render_point_imgs_dict[_view_id]
+        self.input_point_imgs = input_render_point_imgs_dict[_view_id]
         self.real_point_imgs = real_render_point_imgs_dict[_view_id]
         for _index in range(1, len(random_view_ids)):  # 对每个点云将8个视图concat起来，最终real_imgs等变为2*8*256*256
-            # _view_id = random_view_ids[_index]
+            _view_id = random_view_ids[_index]
             # self.input_point_imgs = torch.cat(
             #     (self.input_point_imgs, input_render_point_imgs_dict[_view_id]), dim=1
             # ).to(self.gpu_ids[0])
@@ -269,28 +293,36 @@ class sparenetGANRunner(BaseRunner):
                 (self.real_point_imgs, real_render_point_imgs_dict[_view_id]), dim=1
             ).to(self.gpu_ids[0])
 
-    def index2point(self, index_img, data):
+    def index2point(self, index_img, data, mask):
         # for循环解决多个batch的问题
         # temp解决index的shape的问题
         # mask解决index值为-1的问题
         size = index_img.size()
-        mask = (index_img != -1)
         index_img = index_img * mask
-        index_img = index_img.contiguous().view(size[0], size[2], size[3], size[1])
-        index_img = index_img.expand(size[0], size[2], size[3], size[1]*3)
-        mask = mask.contiguous().view(size[0], size[2], size[3], size[1])
-        mask = mask.expand(size[0], size[2], size[3], size[1]*3)
+        index_img = index_img.permute(0, 2, 3, 1)
+        index_img = index_img.expand(size[0], size[2], size[3], size[1] * 3)
+        mask = mask.permute(0, 2, 3, 1)
+        mask = mask.expand(size[0], size[2], size[3], size[1] * 3)
 
         res = self.index2point_perchannel(index_img, mask, data, 0)
-        for i in range(1,size[0]):
+        for i in range(1, size[0]):
             res = torch.cat((res, self.index2point_perchannel(index_img, mask, data, i)), dim=0)
 
-        return res.contiguous().view(res.size()[0],1,res.size()[3],res.size()[1],res.size()[2])
+        # 这里的view是极其错误的 res.contiguous().view(res.size()[0],1,res.size()[3],res.size()[1],res.size()[2])
+        # 添加一维用unsqueeze，维度转换用permute
+        res = res.permute(0, 3, 1, 2)  # torch.Size([4, 128, 128, 3]) --> torch.Size([4, 3, 128, 128])
+        res = torch.unsqueeze(res, 1)  # torch.Size([4, 3, 128, 128]) --> torch.Size([4, 1, 3, 128, 128])
+        return res
 
-    def index2point_perchannel(self,index_img,mask,data,i):
-        temp = index_img[i,:,:,:]
-        mask_temp = mask[i,:,:,:]
-        data_temp = data[i,:,:]
+    def index2point_perchannel(self, index_img, mask, data, i):
+        temp = index_img[i, :, :, :]
+        mask_temp = mask[i, :, :, :]
+        data_temp = data[i, :, :]
+
+        # 将无效点转化为-1，而非0，因为像素点的范围在[-1,1]之间，如果是0的话是有实际的像素意义的，-1是255中的0
+        ones = torch.ones(mask_temp.size()).to(self.gpu_ids[0])
+        bais = ones * mask_temp
+        bais = (ones - bais) * (-1)
 
         temp = temp % 3000
 
@@ -298,69 +330,9 @@ class sparenetGANRunner(BaseRunner):
         temp = temp.contiguous().view(size[0] * size[1], size[2]).long()
         temp = torch.gather(data_temp, 0, temp)
         temp = temp.contiguous().view(size) * mask_temp
-        temp = temp.contiguous().view(1,temp.size()[0],temp.size()[1],temp.size()[2])
+        temp = temp + bais
+        temp = torch.unsqueeze(temp, 0)
         return temp
-
-    def get_view_points_image(self, data, code="default"):
-        input_render_imgs_dict = {}  # 渲染的一个点云partial的所有img
-        input_render_point_imgs_dict = {}  # 渲染的一个点云partial的所有img
-        random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
-        random_view_ids = list(range(0, N_VIEWS_PREDEFINED_GEN, 1))  # 随机视角ID  从0到7
-
-        for _view_id in random_view_ids:
-            input_render_imgs_dict[_view_id], input_index = self.renderer_gen(data["partial_cloud"], view_id=_view_id, radius_list=[random_radius])
-            input_render_point_imgs_dict[_view_id] = self.index2point_singleview(input_index, data["partial_cloud"])
-            if VISUALIZER_PRE == True:
-                img = input_render_imgs_dict[_view_id]
-                temp_pc = input_render_point_imgs_dict[_view_id][0,:,:,:]
-                img_te = get_ptcloud_img(temp_pc.cpu())               # temp_pc torch.Size([2, 3, 512])
-                img_te = Image.fromarray(img_te)
-                img_te.save(VIS_PATH_PC+'{}_{}.jpg'.format(str(code[0]), str(_view_id)))
-                vutils.save_image(img[0, :, :, :], VIS_PATH_GT+'{}_{}.jpg'.format(str(code[0]), str(_view_id)),
-                                  normalize=True)         # torch.Size([1, 256, 256])
-                self.save_pc8view(temp_pc.view(temp_pc.size()[0],temp_pc.size()[2],temp_pc.size()[1]),code[0]+"_"+str(_view_id))
-
-    def index2point_singleview(self, index_img, data):
-        # for循环解决多个batch的问题
-        # temp解决index的shape的问题
-        # mask解决index值为-1的问题
-        size = index_img.size()
-        mask = (index_img != -1)
-        index_img = index_img * mask        # 含0的index数组而非之前的含的是-1
-        index_img = index_img.contiguous().view(size[0], size[2], size[3])                 # torch.Size([1, 256, 256, 1])
-        index_img = index_img.contiguous().view(size[0], size[2] * size[3])
-
-        res = self.index2point_perchannel_singleview(index_img, mask, data, 0)
-        for i in range(1,size[0]):
-            res = torch.cat((res, self.index2point_perchannel_singleview(index_img, mask, data, i)), dim=0)
-
-        return res.contiguous().view(res.size()[0],1,res.size()[2],res.size()[1])
-
-    def index2point_perchannel_singleview(self,index_img,mask,data,i):
-        temp = index_img[i,:]
-        mask_temp = mask[i,:,:,:]
-        data_temp = data[i,:,:]
-
-        temp = temp % 3000
-
-        out_index = torch.unique(temp)[1:]        # 获得所有非0的
-        out_index = out_index.view(out_index.size()[0],1).expand(out_index.size()[0], 3).long()
-
-        temp = torch.gather(data_temp, 0, out_index)
-
-        return temp.view(1,temp.size()[0],temp.size()[1])
-
-    def save_pc8view(self,pc_data,code):
-        input_render_imgs_dict = {}
-        random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
-        random_view_ids = list(range(0, N_VIEWS_PREDEFINED, 1))  # 随机视角ID  从0到7
-
-        for _view_id in random_view_ids:
-            # get real_imgs, gen_imgs and input_render_imgs
-            temp,_ = self.renderer_dis(
-                pc_data, view_id=_view_id, radius_list=[random_radius]
-            )
-            vutils.save_image(temp, VIS_PATH_PC_ALL+'{}_{}.jpg'.format(str(code), str(_view_id)), normalize=True)
 
     # 核心代码
     def discriminator_backward(self, data, labels, rendered_ptcloud):

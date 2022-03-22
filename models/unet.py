@@ -27,13 +27,13 @@ class UnetEncoder(nn.Module):
         self.e4_c = spectral_norm(nn.Conv2d(ngf*4, ngf*8, kernel_size=4, stride=2, padding=1), use_spectral_norm)
         self.e4_norm = norm_layer(ngf*8)
 
-        self.e5_c = spectral_norm(nn.Conv2d(ngf*8, ngf*16, kernel_size=4, stride=2, padding=1), use_spectral_norm)
-        self.e5_norm = norm_layer(ngf*16)
+        self.e5_c = spectral_norm(nn.Conv2d(ngf*8, ngf*8, kernel_size=4, stride=2, padding=1), use_spectral_norm)
+        self.e5_norm = norm_layer(ngf*8)
 
-        self.e6_c = spectral_norm(nn.Conv2d(ngf*16, ngf*32, kernel_size=4, stride=2, padding=1), use_spectral_norm)
-        self.e6_norm = norm_layer(ngf * 32)
+        self.e6_c = spectral_norm(nn.Conv2d(ngf*8, ngf*8, kernel_size=4, stride=2, padding=1), use_spectral_norm)
+        self.e6_norm = norm_layer(ngf * 8)
 
-        self.e7_c = spectral_norm(nn.Conv2d(ngf * 32, ngf * 32, kernel_size=4, stride=2, padding=1), use_spectral_norm)
+        self.e7_c = spectral_norm(nn.Conv2d(ngf * 8, ngf * 8, kernel_size=4, stride=2, padding=1), use_spectral_norm)
 
 
     # In this case, we have very flexible unet construction mode.

@@ -48,13 +48,36 @@ def renderer_init(cfg):
         renderer: torch.nn.module
     """
     # Create the differentiable renderer
-    renderer_dis = ComputeDepthMaps(
+    renderer_dis= ComputeDepthMaps(
         projection=cfg.RENDER.projection,
         eyepos_scale=cfg.RENDER.eyepos,
         image_size=cfg.RENDER.img_size,
     ).float()
 
     return renderer_dis
+
+def renderer_init2(cfg):
+    """
+    input:
+        cfg: EasyDict
+
+    output:
+        renderer: torch.nn.module
+    """
+    # Create the differentiable renderer
+    renderer_dis= ComputeDepthMaps(
+        projection=cfg.RENDER.projection,
+        eyepos_scale=cfg.RENDER.eyepos,
+        image_size=cfg.RENDER.img_size,
+    ).float()
+
+    renderer_gen = MviewComputeDepthMaps(
+        projection=cfg.RENDER.projection,
+        eyepos_scale=cfg.RENDER.eyepos,
+        image_size=cfg.RENDER.img_size,
+    ).float()
+
+    return renderer_dis, renderer_gen
 
 
 # netD初始化

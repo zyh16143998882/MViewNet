@@ -17,8 +17,8 @@ NETWORK:
     - 0.01
   model_type: "MViewNet"
   metric: "emd"
-#  encode: "Residualnet"
   encode: "Pointfeat"
+#  encode: "Pointfeat"
 #  decode: "Sparenet"
   n_primitives: 8        # 解码器那里控制多少个并行的解码网络，Sparenet的
   decode: "Mviewnet"

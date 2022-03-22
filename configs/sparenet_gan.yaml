@@ -20,7 +20,7 @@ NETWORK:
 #  encode: "Residualnet"
   encode: "Pointfeat"
 #  decode: "Sparenet"
-  n_primitives: 8        # 解码器那里控制多少个并行的解码网络，Sparenet的
+  n_primitives: 32        # 解码器那里控制多少个并行的解码网络，Sparenet的
   decode: "Mviewnet"
   use_adain: "share"
   use_recurefine: false
