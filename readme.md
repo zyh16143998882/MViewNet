@@ -45,4 +45,7 @@ MViewNet的dec改为8个并行 render init那里改为只有一个render
 添加MViewPontNet
 
 
+# 0320 添加UNet生成网络及Inpainting网络
+
+# 0321 使用UNet生成粗略pc
 

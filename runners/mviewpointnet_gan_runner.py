@@ -151,7 +151,7 @@ class mviewpointnetGANRunner(BaseRunner):
             refine_ptcloud,
             expansion_penalty,
             res_fake,
-        ) = self.models(data, self.input_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
+        ) = self.models(data, self.real_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
 
         if self.config.NETWORK.metric == "chamfer":
             coarse_loss = self.chamfer_dist_mean(coarse_ptcloud, data["gtcloud"]).mean()
@@ -282,16 +282,20 @@ class mviewpointnetGANRunner(BaseRunner):
         size = index_img.size()
         mask = (index_img != -1)
         index_img = index_img * mask
-        index_img = index_img.contiguous().view(size[0], size[2], size[3], size[1])
+        index_img = index_img.permute(0,2,3,1)
         index_img = index_img.expand(size[0], size[2], size[3], size[1]*3)
-        mask = mask.contiguous().view(size[0], size[2], size[3], size[1])
+        mask = mask.permute(0,2,3,1)
         mask = mask.expand(size[0], size[2], size[3], size[1]*3)
 
         res = self.index2point_perchannel(index_img, mask, data, 0)
         for i in range(1,size[0]):
             res = torch.cat((res, self.index2point_perchannel(index_img, mask, data, i)), dim=0)
 
-        return res.contiguous().view(res.size()[0],1,res.size()[3],res.size()[1],res.size()[2])
+        # 这里的view是极其错误的 res.contiguous().view(res.size()[0],1,res.size()[3],res.size()[1],res.size()[2])
+        # 添加一维用unsqueeze，维度转换用permute
+        res = res.permute(0,3,1,2)      # torch.Size([4, 128, 128, 3]) --> torch.Size([4, 3, 128, 128])
+        res = torch.unsqueeze(res, 1)   # torch.Size([4, 3, 128, 128]) --> torch.Size([4, 1, 3, 128, 128])
+        return res
 
     def index2point_perchannel(self,index_img,mask,data,i):
         temp = index_img[i,:,:,:]
@@ -304,7 +308,7 @@ class mviewpointnetGANRunner(BaseRunner):
         temp = temp.contiguous().view(size[0] * size[1], size[2]).long()
         temp = torch.gather(data_temp, 0, temp)
         temp = temp.contiguous().view(size) * mask_temp
-        temp = temp.contiguous().view(1,temp.size()[0],temp.size()[1],temp.size()[2])
+        temp = torch.unsqueeze(temp, 0)
         return temp
 
     def get_view_points_image(self, data, code="default"):

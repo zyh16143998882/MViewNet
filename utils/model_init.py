@@ -147,6 +147,21 @@ def define_G(cfg):
             decode=cfg.NETWORK.decode,
             hide_size=4096,
         )
+    elif cfg.NETWORK.model_type == name.MODEL_INPAINTINGNET:
+        from models.sparenet_generator import InpaintingNetGenerator
+
+        # from models.mvnet import MVNet
+        network = InpaintingNetGenerator(
+            num_points=cfg.DATASET.n_outpoints,
+            bottleneck_size=4096,
+            n_primitives=cfg.NETWORK.n_primitives,
+            use_SElayer=cfg.NETWORK.use_selayer,
+            use_AdaIn=cfg.NETWORK.use_adain,
+            use_RecuRefine=cfg.NETWORK.use_recurefine,
+            encode=cfg.NETWORK.encode,
+            decode=cfg.NETWORK.decode,
+            hide_size=4096,
+        )
     else:
         raise Exception("Unknown model type")
     return network

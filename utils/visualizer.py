@@ -13,24 +13,32 @@ from mpl_toolkits.mplot3d import Axes3D
 from utils.p2i_utils import ComputeDepthMaps
 from cuda.chamfer_distance import ChamferDistance, ChamferDistanceMean
 
-VISUALIZER = False
+VISUALIZER_PC = False
 VISUALIZER_PRE = False
-VIS_PATH_PC_ALL = './output/exp2/pc_all/'
-VIS_PATH_PC = './output/exp2/pc/'
-VIS_PATH_GT = './output/exp2/gt/'       # img
-VIS_PATH_PARTIAL = './output/exp2/partial/'
-REFINE = False
-if VISUALIZER_PRE == True:
-    if not os.path.isdir(VIS_PATH_PC_ALL):
-        os.makedirs(VIS_PATH_PC_ALL)
+VIS_PATH_PC_ALL = './output/vis/pc_all/'
+VIS_PATH_PC_3 = './output/vis/pc/'
+VIS_PATH_PC = './output/vis/pc_3/'
+VIS_PATH_GT = './output/vis/gt/'       # img
+VIS_PATH_PARTIAL = './output/vis/partial/'
+VIS_REAL_PATH_POINT = './output/vis/realpoint/'
+VIS_INPUT_PATH_POINT = './output/vis/inputpoint/'
+VISUALIZER = False
+if VISUALIZER_PC == True:
     if not os.path.isdir(VIS_PATH_PC):
         os.makedirs(VIS_PATH_PC)
-    if not os.path.isdir(VIS_PATH_GT):
-        os.makedirs(VIS_PATH_GT)
+    if not os.path.isdir(VIS_PATH_PC_3):
+        os.makedirs(VIS_PATH_PC_3)
+if VISUALIZER_PRE == True:
+    if not os.path.isdir(VIS_REAL_PATH_POINT):
+        os.makedirs(VIS_REAL_PATH_POINT)
+    if not os.path.isdir(VIS_INPUT_PATH_POINT):
+        os.makedirs(VIS_INPUT_PATH_POINT)
     if not os.path.isdir(VIS_PATH_PARTIAL):
         os.makedirs(VIS_PATH_PARTIAL)
+    if not os.path.isdir(VIS_PATH_GT):
+        os.makedirs(VIS_PATH_GT)
 
-
+# b c n
 def get_ptcloud_img(ptcloud):
     """ Point cloud visualization via matplotlib """
     fig = plt.figure(figsize=(3, 3))
