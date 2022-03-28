@@ -367,8 +367,9 @@ class BaseRunner(object):
             self.train()
             self.build_val_loss()
             # 每一个都val
-            with torch.no_grad():
-                self.val()
+            if epoch_idx > 145:
+                with torch.no_grad():
+                    self.val()
         self.end_time = time()
         self.logger.info("runner time: %3f" % (self.end_time - self.start_time))
         self.train_writer.close()

@@ -79,7 +79,7 @@ __C.GAN.weight_gan = 0.1  # 0.1
 __C.TRAIN = edict()
 __C.TRAIN.batch_size = 1
 __C.TRAIN.n_epochs = 150
-__C.TRAIN.save_freq = []
+__C.TRAIN.save_freq = 5
 __C.TRAIN.log_freq = 1
 __C.TRAIN.learning_rate = 1e-4
 __C.TRAIN.lr_milestones = [1000]  # don't schedule
@@ -102,11 +102,21 @@ __C.DATASETS.shapenet.n_points = 16384
 __C.DATASETS.shapenet.version = "GRnet"         # ShapeNet的Version是GRnet
 # __C.DATASETS.shapenet.category_file_path = "./datasets/data/ShapeNet-Car3.json"
 __C.DATASETS.shapenet.category_file_path = "./datasets/data/ShapeNet.json"
+
+# __C.DATASETS.shapenet.partial_points_path = "/data/zhayaohua/Datasets/ShapeNetCompletion/%s/partial/%s/%s/%02d.pcd"
+# __C.DATASETS.shapenet.complete_points_path = "/data/zhayaohua/Datasets/ShapeNetCompletion/%s/complete/%s/%s.pcd"
+# # ShapeNet点云的32视图路径
+# __C.DATASETS.shapenet.train_img_path = "/data/zhayaohua/Datasets/ShapeNetImg/train/partial/%s_%s_%s_%s.jpg"
+# __C.DATASETS.shapenet.test_img_path = "/data/zhayaohua/Datasets/ShapeNetImg/test/partial/%s_%s_%s_%s.jpg"
+
+
 __C.DATASETS.shapenet.partial_points_path = "/youtu/xlab-team1/sunanhe/demo/PCF2dNet100/Datasets/ShapeNetCompletion/%s/partial/%s/%s/%02d.pcd"
 __C.DATASETS.shapenet.complete_points_path = "/youtu/xlab-team1/sunanhe/demo/PCF2dNet100/Datasets/ShapeNetCompletion/%s/complete/%s/%s.pcd"
 # ShapeNet点云的32视图路径
 __C.DATASETS.shapenet.train_img_path = "/youtu/xlab-team1/sunanhe/demo/PCF2dNet100/Datasets/ShapeNetImg/train/partial/%s_%s_%s_%s.jpg"
 __C.DATASETS.shapenet.test_img_path = "/youtu/xlab-team1/sunanhe/demo/PCF2dNet100/Datasets/ShapeNetImg/test/partial/%s_%s_%s_%s.jpg"
+
+
 __C.DATASETS.completion3d = edict()
 __C.DATASETS.completion3d.category_file_path = "/path/to/datasets/data/Completion3D.json"
 __C.DATASETS.completion3d.partial_points_path = "/path/to/datasets/completion3d/data/shapenet/%s/partial/%s/%s.h5"

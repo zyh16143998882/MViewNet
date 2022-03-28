@@ -13,15 +13,16 @@ def get_args_from_command_line():
     parser = argparse.ArgumentParser(description="The argument parser of R2Net runner")
 
     # choose model
-    parser.add_argument("--model", type=str, default="sparenet", help="sparenet, pcf2dnet, mviewnet, mviewpointnet, inpaintingnet")
+    parser.add_argument("--model", type=str, default="grnet", help="sparenet, pcf2dnet, mviewnet, mviewpointnet, inpaintingnet,grnet")
 
     # choose train mode
-    parser.add_argument("--gan", dest="gan", help="use gan", action="store_true", default=True)
+    parser.add_argument("--gan", dest="gan", help="use gan", action="store_true", default=False)
 
     # choose pretrain model
     parser.add_argument("--pretrain", dest="pretrain", help="Initialize network from the weights file", default=None)
 
     # choose load model
+    # parser.add_argument("--weights", dest="weights", help="Initialize network from the weights file", default="./checkpoint/ckpt-best.pth")
     parser.add_argument("--weights", dest="weights", help="Initialize network from the weights file", default=None)
 
     # setup gpu

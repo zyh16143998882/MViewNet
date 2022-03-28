@@ -114,7 +114,7 @@ def checkpoint_save(cfg, epoch_idx, metrics, best_metrics, net_G):
         best_metrics: dic
     """
     # save tbe best model
-    if epoch_idx in cfg.TRAIN.save_freq or metrics.better_than(best_metrics):
+    if epoch_idx > 145 or metrics.better_than(best_metrics):
         file_name = "ckpt-best.pth" if metrics.better_than(best_metrics) else "ckpt-epoch-%03d.pth" % epoch_idx     # 只存一个优先存best
         output_path = os.path.join(cfg.DIR.checkpoints, file_name)
         # save the epoch and metrics and net_G

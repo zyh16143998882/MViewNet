@@ -28,27 +28,22 @@ class inpaintingnetGANRunner(BaseRunner):
     def __init__(self, config, logger):
         super().__init__(config, logger)        # 先调baserunner的初始化方法
         self.losses = AverageMeter(
-            ["CoarseLoss", "RefineLoss", "errG", "errG_D", "DisRealLoss", "DisFakeLoss"]
+            ["CoarseLoss", "RefineLoss"]
         )
         self.test_losses = AverageMeter(
-            ["CoarseLoss", "RefineLoss", "errG", "errG_D", "DisRealLoss", "DisFakeLoss"]
+            ["CoarseLoss", "RefineLoss"]
         )
         self.test_metrics = AverageMeter(um.Metrics.names())
         self.chamfer_dist = None
         self.chamfer_dist_mean = None
         self.emd_dist = None
-        self.criterionD = torch.nn.MSELoss()
 
     def build_models(self):
         super().build_models()  # 这里是对netG的初始化
         self.renderer_dis = renderer_init(self.config)  # 初始化渲染器
-        self.models_D, self.optimizers_D, self.lr_schedulers_D = discriminator_init(self.config)  # 初始化netD
 
     def data_parallel(self):
         super().data_parallel()
-        self.models_D = torch.nn.DataParallel(
-            self.models_D.to(self.gpu_ids[0]), device_ids=self.gpu_ids
-        )
         self.renderer_dis = torch.nn.DataParallel(
             self.renderer_dis.to(self.gpu_ids[0]), device_ids=self.gpu_ids
         )
@@ -64,7 +59,6 @@ class inpaintingnetGANRunner(BaseRunner):
         self.emd_dist = torch.nn.DataParallel(
             emd.emdModule().to(self.gpu_ids[0]), device_ids=self.gpu_ids
         )
-        self.criterionL1_loss = torch.nn.L1Loss()
 
     def build_val_loss(self):
         # Set up loss functions
@@ -73,12 +67,10 @@ class inpaintingnetGANRunner(BaseRunner):
         self.emd_dist = emd.emdModule().cuda()
 
     def train_step(self, items):
-
         # prepare the data and label
         _, (_, labels, code, data) = items
         for k, v in data.items():
             data[k] = v.float().to(self.gpu_ids[0])
-        labels = torch.tensor(labels, dtype=torch.long).to(self.gpu_ids[0])
 
         # 获取点云的gt和partial的深度图
         self.get_depth_image(data,code)
@@ -256,15 +248,15 @@ class inpaintingnetGANRunner(BaseRunner):
         real_render_point_imgs_dict = {}
         input_render_point_imgs_dict = {}
         random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
-        random_view_ids = list(range(0, N_VIEWS_PREDEFINED_GEN, 1))  # 随机视角ID  从0到7
+        random_view_ids = list(range(0, N_VIEWS_PREDEFINED, 1))  # 随机视角ID  从0到7
 
         for _view_id in random_view_ids:
-            partial_img, input_index = self.renderer_gen(data["partial_cloud"], view_id=_view_id,
+            partial_img, input_index = self.renderer_dis(data["partial_cloud"], view_id=_view_id,
                                                          radius_list=[random_radius])
             partial_mask = (partial_img != 0)
             input_render_point_imgs_dict[_view_id] = self.index2point(input_index, data["partial_cloud"], partial_mask)
 
-            gt_img, real_index = self.renderer_gen(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
+            gt_img, real_index = self.renderer_dis(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
             gt_mask = (gt_img != 0)
             real_render_point_imgs_dict[_view_id] = self.index2point(real_index, data["gtcloud"], gt_mask)
 

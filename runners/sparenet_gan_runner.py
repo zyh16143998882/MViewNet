@@ -14,7 +14,7 @@ from cuda.chamfer_distance import ChamferDistance, ChamferDistanceMean
 from runners.misc import AverageMeter
 from runners.base_runner import BaseRunner
 from utils.visualizer import VISUALIZER_PRE, get_ptcloud_img, VIS_PATH_GT, VIS_PATH_PC, VIS_PATH_PC_ALL, \
-    VIS_PATH_PARTIAL, VIS_INPUT_PATH_POINT, VIS_REAL_PATH_POINT
+    VIS_PATH_PARTIAL, VIS_INPUT_PATH_POINT, VIS_REAL_PATH_POINT, MASK_IMG, VIS_PATH_MASK
 from PIL import Image
 from  torchvision import utils as vutils
 
@@ -152,7 +152,7 @@ class sparenetGANRunner(BaseRunner):
             middle_ptcloud,
             refine_ptcloud,
             expansion_penalty,
-        ) = self.models(data, self.real_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
+        ) = self.models(data, self.input_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
 
         if self.config.NETWORK.metric == "chamfer":
             coarse_loss = self.chamfer_dist_mean(coarse_ptcloud, data["gtcloud"]).mean()
@@ -207,7 +207,7 @@ class sparenetGANRunner(BaseRunner):
             middle_ptcloud,
             refine_ptcloud,
             expansion_penalty,
-        ) = self.models(data, self.real_point_imgs)
+        ) = self.models(data, self.input_point_imgs)
 
         if self.config.NETWORK.metric == "chamfer":
             coarse_loss = self.chamfer_dist_mean(coarse_ptcloud, data["gtcloud"]).mean()
@@ -281,17 +281,24 @@ class sparenetGANRunner(BaseRunner):
                     vutils.save_image(img4[i, :, :, :], VIS_PATH_GT + '{}_{}.jpg'.format(str(code[i]), str(_view_id)),
                                       normalize=True)
 
+            if MASK_IMG == True:
+                for i in range(gt_img.size()[0]):
+                    pos_mask = gt_mask[i, :, :, :].float() - partial_mask[i, :, :, :].float()
+                    vutils.save_image(pos_mask, VIS_PATH_MASK + '{}_{}.jpg'.format(str(code[i]), str(_view_id)),
+                                      normalize=True)
+
+
         _view_id = random_view_ids[0]
         self.input_point_imgs = input_render_point_imgs_dict[_view_id]
         self.real_point_imgs = real_render_point_imgs_dict[_view_id]
         for _index in range(1, len(random_view_ids)):  # 对每个点云将8个视图concat起来，最终real_imgs等变为2*8*256*256
             _view_id = random_view_ids[_index]
-            # self.input_point_imgs = torch.cat(
-            #     (self.input_point_imgs, input_render_point_imgs_dict[_view_id]), dim=1
-            # ).to(self.gpu_ids[0])
-            self.real_point_imgs = torch.cat(
-                (self.real_point_imgs, real_render_point_imgs_dict[_view_id]), dim=1
+            self.input_point_imgs = torch.cat(
+                (self.input_point_imgs, input_render_point_imgs_dict[_view_id]), dim=1
             ).to(self.gpu_ids[0])
+            # self.real_point_imgs = torch.cat(
+            #     (self.real_point_imgs, real_render_point_imgs_dict[_view_id]), dim=1
+            # ).to(self.gpu_ids[0])
 
     def index2point(self, index_img, data, mask):
         # for循环解决多个batch的问题

@@ -325,19 +325,7 @@ class InpaintingNetGenerator(nn.Module):
         partial = partial_x  # [batch_size, 3, in_points]
 
         # decode
-        outs,res_fake= self.decoder(point_imgs, code)                         # 这里的outs torch.Size([2, 3, 131072])
-        if VISUALIZER_PC == True:
-            plot_pcd_three_views(VIS_PATH_PC_3+'{}_all.jpg'.format(str(code[0])),outs.cpu(),"1","2")
-            # img_te = get_ptcloud_img(outs.permute(0,2,1).cpu())
-            # img_te = Image.fromarray(img_te)
-            # img_te.save(VIS_PATH_PC+'{}_all.jpg'.format(str(code[0])))
-        outs = pointnet2_utils.gather_operation(outs.transpose(1, 2).contiguous(), pointnet2_utils.furthest_point_sample(outs, 16384))      # 这里的outs torch.Size([2, 3, 16384])
-        if VISUALIZER_PC == True:
-            plot_pcd_three_views(VIS_PATH_PC_3 + '{}_coarse.jpg'.format(str(code[0])), outs.permute(0,2,1).cpu(), "1", "2")
-            # img_te = get_ptcloud_img(outs.cpu())
-            # img_te = Image.fromarray(img_te)
-            # img_te.save(VIS_PATH_PC+'{}_coarse.jpg'.format(str(code[0])))
-
+        outs,res_fake = self.decoder(point_imgs, code)                         # 这里的outs torch.Size([2, 3, 131072])
 
         coarse = outs.transpose(1,2).contiguous()  # [batch_size, out_points, 3]   # 再转置回来，contiguous()操作往往和转置相搭配 torch.Size([2, 16384, 3])
 
@@ -428,7 +416,7 @@ class PCF2dNetGenerator(nn.Module):
             use_SElayer=use_SElayer,
         )
 
-    def forward(self, data, partial_imgs, gt_imgs,code="default"):
+    def forward(self, data, partial_imgs, code="default"):
         partial_x = data["partial_cloud"]       # 拿不全的点云
         partial_x = partial_x.transpose(1, 2).contiguous()  # [bs, 3, in_points]    开始是[bs, in_points, 3]之后只转置2 3维得到前面的
         partial = partial_x  # [batch_size, 3, in_points]
@@ -437,7 +425,7 @@ class PCF2dNetGenerator(nn.Module):
         style = self.encoder(partial_x)  # [batch_size, 1024]       # 输入到encoder得到1024维特征
 
         # decode
-        outs, feature_loss = self.decoder(style, partial_x, partial_imgs, gt_imgs, code)                       # 用1024维特征使用风格解码器申城粗略点云 torch.Size([2, 3, 16384])
+        outs,x = self.decoder(style, partial_imgs, code)                       # 用1024维特征使用风格解码器申城粗略点云 torch.Size([2, 3, 16384])
         if VISUALIZER == True:
             img_te = get_ptcloud_img(outs.cpu())
             img_te = Image.fromarray(img_te)
@@ -457,9 +445,9 @@ class PCF2dNetGenerator(nn.Module):
             outs_2 = middle.transpose(1, 2).contiguous()
             refine, _ = self.refine(outs_2, partial, middle)            # Yr1和部分点云做微调得到最终的生成结果Yr2即Y
 
-            return coarse, middle, refine, loss_mst, feature_loss                     # 返回粗略点云，第一次微调点云，最终点云以及第一次微调loss
+            return coarse, middle, refine, loss_mst, x                     # 返回粗略点云，第一次微调点云，最终点云以及第一次微调loss
         else:
-            return coarse, middle, None, loss_mst, feature_loss                     # 返回粗略点云，第一次微调点云，最终点云以及第一次微调loss
+            return coarse, middle, None, loss_mst, x                    # 返回粗略点云，第一次微调点云，最终点云以及第一次微调loss
 
 
 
@@ -699,14 +687,7 @@ class SpareNetDecode(nn.Module):
         self.n_primitives = n_primitives
         self.bottleneck_size = bottleneck_size
         self.decode = decode
-        # 这里share的意思是那32个生成粗略点云的网络是用的同一个网络
-        # 我这里修改一下，原本是32个生成有512个粗略点的点云生成网络。改成8个生成2048个粗略点的点云生成网络
 
-        # 思路：使用一个点云的8张深度图来生成粗略点云，使用一个共享的网络，类似于上面的share模式，这个网络以一张深度图(batch*1*256*256)作为输入,输出为batch*2048*3
-        # 网络结构为类似unet，
-        # 定义一个二维特征提取网络，使用与UNet相同的编码器.将输入batch*1*256*256变为batch*2048*1*1。这里不能把unet定义到StyleBasedMViewNet，这样做会占大量内存
-        # 定义编码器
-        # self.mviewnet_encoder = MViewEncoder(3, 32, norm_layer=functools.partial(nn.InstanceNorm2d, affine=True,track_running_stats=False),use_spectral_norm=False)
         self.unet_encoder = UnetEncoder(3, 64, norm_layer=functools.partial(nn.InstanceNorm2d, affine=True,
                                                                             track_running_stats=False),
                                         use_spectral_norm=False)
@@ -724,19 +705,49 @@ class SpareNetDecode(nn.Module):
 
         # MLP to generate AdaIN parameters
         self.mlp = nn.Sequential(
-            nn.Linear(self.bottleneck_size, self.bottleneck_size),
+            nn.Linear(6144, 6144),
             nn.ReLU(),
-            nn.Linear(self.bottleneck_size, get_num_adain_params(self.decoder[0])),
+            nn.Linear(6144, get_num_adain_params(self.decoder[0])),
         )
+
+    # def forward(self, style, point_imgs, code="default"):
+    #     outs = []
+    #     adain_params = self.mlp(style)
+    #     for i in range(self.n_primitives):
+    #         point_img = point_imgs[:, i, :, :, :]  # torch.Size([8, 3, 256, 256])
+    #         dec_input = self.unet_encoder(point_img)
+    #         dec_input = torch.flatten(((dec_input - 0.5) * 2).contiguous(),start_dim=2,end_dim=3).permute(0, 2, 1)
+    #         temp_pc = self.decoder[i](dec_input, adain_params)
+    #         if VISUALIZER_PC == True:
+    #             vutils.save_image(point_img[0, :, :, :],
+    #                               VIS_PATH_PC_3 + '{}_{}.jpg'.format(str(code[0]), str(i)),
+    #                               normalize=True)
+    #             plot_pcd_three_views(VIS_PATH_PC + '{}_{}.jpg'.format(str(code[0]),str(i)),
+    #                                  temp_pc.detach().permute(0, 2, 1).cpu(),
+    #                                  ["1","1"], ["2","2"])
+    #
+    #
+    #         outs.append(temp_pc)  # 将整个decoder的输入torch.Size([2, 2, 512])输入到第i个decoder中。主要在self.decoder中进行处理
+    #
+    #     return torch.cat(outs, 2).contiguous()
 
     def forward(self, style, point_imgs, code="default"):
         outs = []
-        adain_params = self.mlp(style)
         for i in range(self.n_primitives):
             point_img = point_imgs[:, i, :, :, :]  # torch.Size([8, 3, 256, 256])
-            dec_input = self.unet_encoder(point_img)
+            dec_input, e8 = self.unet_encoder(point_img)
             dec_input = torch.flatten(((dec_input - 0.5) * 2).contiguous(),start_dim=2,end_dim=3).permute(0, 2, 1)
+            e8 = torch.cat([style,torch.squeeze(torch.flatten(e8,start_dim=2,end_dim=3),2)],dim=1)
+            adain_params = self.mlp(e8)
             temp_pc = self.decoder[i](dec_input, adain_params)
+            if VISUALIZER_PC == True:
+                vutils.save_image(point_img[0, :, :, :],
+                                  VIS_PATH_PC_3 + '{}_{}.jpg'.format(str(code[0]), str(i)),
+                                  normalize=True)
+                plot_pcd_three_views(VIS_PATH_PC + '{}_{}.jpg'.format(str(code[0]),str(i)),
+                                     temp_pc.detach().permute(0, 2, 1).cpu(),
+                                     ["1","1"], ["2","2"])
+
 
             outs.append(temp_pc)  # 将整个decoder的输入torch.Size([2, 2, 512])输入到第i个decoder中。主要在self.decoder中进行处理
 
@@ -838,53 +849,32 @@ class InpaintingNetDecode(nn.Module):
         self.bottleneck_size = bottleneck_size
         self.decode = decode
         self.criterionL1_loss = torch.nn.L1Loss()
-        # 这里share的意思是那32个生成粗略点云的网络是用的同一个网络
-        # 我这里修改一下，原本是32个生成有512个粗略点的点云生成网络。改成8个生成2048个粗略点的点云生成网络
 
-        # 思路：使用一个点云的8张深度图来生成粗略点云，使用一个共享的网络，类似于上面的share模式，这个网络以一张深度图(batch*1*256*256)作为输入,输出为batch*2048*3
-        # 网络结构为类似unet，
-        # 定义一个二维特征提取网络，使用与UNet相同的编码器.将输入batch*1*256*256变为batch*2048*1*1。这里不能把unet定义到StyleBasedMViewNet，这样做会占大量内存
-        # 定义编码器
-        # self.mviewnet_encoder = MViewEncoder(3, 32, norm_layer=functools.partial(nn.InstanceNorm2d, affine=True,track_running_stats=False),use_spectral_norm=False)
-        # self.unet = EasyUnetGenerator(3,3,64, norm_layer=functools.partial(nn.InstanceNorm2d, affine=True,track_running_stats=False),use_spectral_norm=False)
-        # self.decoder = nn.ModuleList(
-        #     [
-        #         StyleBasedAdaIn(
-        #             input_dim=4,  # 这里从2改为1是说原本输入是随机采样的n*2现在改为图片经过多层卷积后得到的二维特征n*1
-        #             style_dim=self.bottleneck_size,
-        #             # 这里之前只是将self.bottleneck_size赋值给了style_dim，并没有赋给bottleneck_size,不赋的话用默认的1026
-        #             use_SElayer=use_SElayer,
-        #         )
-        #         for i in range(self.n_primitives)
-        #     ]
-        # )
-        #
-        # # MLP to generate AdaIN parameters
-        # self.mlp = nn.Sequential(
-        #     nn.Linear(self.bottleneck_size, self.bottleneck_size),
-        #     nn.ReLU(),
-        #     nn.Linear(self.bottleneck_size, get_num_adain_params(self.decoder[0])),
-        # )
+        self.decoder = nn.ModuleList(
+            [
+                EasyUnetGenerator(3,3,64,
+                                  norm_layer=functools.partial(nn.InstanceNorm2d, affine=True,track_running_stats=False),
+                                  use_spectral_norm=False)
+                for i in range(self.n_primitives)
+            ]
+        )
 
     def forward(self, point_imgs, code="default"):
-        point_img = point_imgs[:, 0, :, :, :]
-        # fake_pointmap, _ = self.unet(point_img)
-        fake_pointmap = point_img
-        res_fake = fake_pointmap
-        outs = torch.squeeze(fake_pointmap,1)
-        outs = outs.permute(0,2,3,1)
-        outs = torch.flatten(outs, start_dim=1,end_dim=2)
+        outs = []
+        fake_imgs = []
 
-        for i in range(1, self.n_primitives):
+        for i in range(self.n_primitives):
             point_img = point_imgs[:, i, :, :, :]
-            # fake_pointmap, _ = self.unet(point_img)
-            fake_pointmap= point_img
-            res_fake = torch.cat((res_fake, fake_pointmap), dim=1)
-            outs_temp = torch.squeeze(fake_pointmap, 1)
-            outs_temp = outs_temp.permute(0, 2, 3, 1)
-            outs_temp = torch.flatten(outs_temp, start_dim=1, end_dim=2)
-            outs = torch.cat((outs, outs_temp), dim=1)
-        return outs, res_fake
+            temp_pc = self.decoder[i](point_img)
+
+            dec_out = torch.flatten(torch.squeeze(temp_pc, 1).permute(0, 2, 3, 1), start_dim=1,
+                                      end_dim=2).contiguous()  # b n c
+            dec_out = pointnet2_utils.gather_operation(dec_out.transpose(1, 2).contiguous(),
+                                                         pointnet2_utils.furthest_point_sample(dec_out,
+                                                                                               16384 // self.n_primitives))
+            outs.append(dec_out)
+            fake_imgs.append(temp_pc)
+        return torch.cat(outs, 2).contiguous(),torch.cat(fake_imgs, 1).contiguous()
 
 
 class MViewNetDecode(nn.Module):
@@ -988,7 +978,8 @@ class MViewNetDecode(nn.Module):
             # 这里的regular_grid应该改为对应的深度图 size为batch*1*256*256
             # 将输入batch*1*256*256变为batch*512*1*1,再将batch*512*1*1变为batch*1*512作为dec的输入
 
-            fake_img = self.unet(point_img)
+            # fake_img = self.unet(point_img)
+            fake_img = torch.unsqueeze(point_img,1)
             # 将fake_img转为点云 最远点采样2048个点作为输入，对8个输入拼起来和gt用cd距离来约束，对fake_img用l1距离来约束
             dec_input = torch.flatten(torch.squeeze(fake_img,1).permute(0,2,3,1),start_dim=1,end_dim=2).contiguous()  # b n c
             dec_input = pointnet2_utils.gather_operation(dec_input.transpose(1, 2).contiguous(), pointnet2_utils.furthest_point_sample(dec_input, 16384//self.n_primitives))
@@ -1103,70 +1094,29 @@ class PCF2dNetDecode(nn.Module):
             exit()
 
 
-    def forward(self, style, partial_x, partial_imgs, gt_imgs, code="default"):
+    def forward(self, style, partial_imgs, code="default"):
         outs = []
-        feature_loss = 0
-        if self.decode == "Sparenet":
-            if self.use_AdaIn == "share":
-                adain_params = self.mlp(style)
-                for i in range(self.n_primitives):
-                    regular_grid = torch.cuda.FloatTensor(self.grid[i])                 # 获取第i个网格并且将其挂到cuda上 list[512]变为torch.Size([512, 2])
-                    regular_grid = regular_grid.transpose(0, 1).contiguous().unsqueeze(0)   # 变为了torch.Size([1, 2, 512])
-                    regular_grid = regular_grid.expand(                                     # partial_x.size(0)是batch
-                        partial_x.size(0), regular_grid.size(1), regular_grid.size(2)
-                    ).contiguous()                                                          # 变为了torch.Size([2, 2, 512])
-                    regular_grid = ((regular_grid - 0.5) * 2).contiguous()                  # 把值域[0,1]变为了[-1,1]
+        x_res = []
+        unet_encoder = None
+        adain_params = self.mlp(style)
+        for i in range(self.n_primitives):
+            partial_img = partial_imgs[:,i,:,:].view(partial_imgs.size(0),1,partial_imgs.size(2),partial_imgs.size(3))
 
-                    outs.append(self.decoder[i](regular_grid, adain_params))     # 将整个decoder的输入torch.Size([2, 2, 512])输入到第i个decoder中。主要在self.decoder中进行处理
-            elif self.use_AdaIn == "no_share":
-                for i in range(self.n_primitives):
-                    regular_grid = torch.cuda.FloatTensor(self.grid[i])
-                    regular_grid = regular_grid.transpose(0, 1).contiguous().unsqueeze(0)
-                    regular_grid = regular_grid.expand(
-                        partial_x.size(0), regular_grid.size(1), regular_grid.size(2)
-                    ).contiguous()
-                    regular_grid = ((regular_grid - 0.5) * 2).contiguous()
+            x = self.unet_gan_encoder(partial_img)
+            # x每个元素的取值由于输出时使用sigmoid进行激活，变为[0,1]之间，所以这里要将[0,1]变为[-1,1]
+            x_temp = ((x - 0.5) * 2).contiguous()
 
-                    outs.append(self.decoder[i](regular_grid, style))
-            elif self.use_AdaIn == "no_use":
-                for i in range(self.n_primitives):
-                    regular_grid = torch.cuda.FloatTensor(self.grid[i])
-                    regular_grid = regular_grid.transpose(0, 1).contiguous().unsqueeze(0)
-                    regular_grid = regular_grid.expand(
-                        partial_x.size(0), regular_grid.size(1), regular_grid.size(2)
-                    ).contiguous()
-                    regular_grid = ((regular_grid - 0.5) * 2).contiguous()
+            temp_pc = self.decoder[i](x_temp.permute(0,2,1), adain_params)
+            # 在这里进行每个点云的可视化
+            if VISUALIZER == True:
+                img_te = get_ptcloud_img(temp_pc.cpu())
+                img_te = Image.fromarray(img_te)
+                img_te.save('./output/cartest/pc/{}_{}.jpg'.format(str(code[0]), str(i)))
+                vutils.save_image(partial_img[0, :, :, :], './output/cartest/gt/{}_{}.jpg'.format(str(code[0]), str(i)), normalize=True)
+            outs.append(temp_pc)     # 将整个decoder的输入torch.Size([2, 2, 512])输入到第i个decoder中。主要在self.decoder中进行处理
+            x_res.append(x.unsqueeze(dim=1))
 
-                    y = (
-                        style.unsqueeze(2)
-                        .expand(style.size(0), style.size(1), regular_grid.size(2))
-                        .contiguous()
-                    )
-                    y = torch.cat((regular_grid, y), 1).contiguous()
-                    outs.append(self.decoder[i](y))
-        elif self.decode == "Mviewnet":
-            adain_params = self.mlp(style)
-            for i in range(self.n_primitives):
-                partial_img = partial_imgs[:,i,:,:].view(partial_imgs.size(0),1,partial_imgs.size(2),partial_imgs.size(3))
-                gt_img = gt_imgs[:,i,:,:].view(gt_imgs.size(0),1,gt_imgs.size(2),gt_imgs.size(3))
-                # 这里的regular_grid应该改为对应的深度图 size为batch*1*256*256
-                # 将输入batch*1*256*256变为batch*512*1*1,再将batch*512*1*1变为batch*1*512作为dec的输入
-                x, _loss = self.unet_gan_encoder(partial_img,gt_img)
-                feature_loss += _loss
-                x = x.view(x.size(0), x.size(1), x.size(2) * x.size(3))
-                # x每个元素的取值由于输出时使用sigmoid进行激活，变为[0,1]之间，所以这里要将[0,1]变为[-1,1]
-                x = ((x - 0.5) * 2).contiguous()
-                # 之前x是torch.Size([2, 2048, 1, 1])需要变为torch.Size([2, 1, 512])
-                temp_pc = self.decoder[i](x.view(x.size(0),x.size(2),x.size(1)), adain_params)
-                # 在这里进行每个点云的可视化
-                if VISUALIZER == True:
-                    img_te = get_ptcloud_img(temp_pc.cpu())
-                    img_te = Image.fromarray(img_te)
-                    img_te.save('./output/cartest/pc/{}_{}.jpg'.format(str(code[0]), str(i)))
-                    vutils.save_image(partial_img[0, :, :, :], './output/cartest/gt/{}_{}.jpg'.format(str(code[0]), str(i)), normalize=True)
-                outs.append(temp_pc)     # 将整个decoder的输入torch.Size([2, 2, 512])输入到第i个decoder中。主要在self.decoder中进行处理
-
-        return torch.cat(outs, 2).contiguous(), feature_loss
+        return torch.cat(outs, 2).contiguous(), torch.cat(x_res, 1).contiguous()
 
 class StyleBasedMViewNet(nn.Module):
     """

@@ -8,7 +8,7 @@ import logging
 from time import time
 import utils.misc as um
 from utils.p2i_utils import N_VIEWS_PREDEFINED, N_VIEWS_PREDEFINED_GEN
-from utils.model_init import discriminator_init, renderer_init
+from utils.model_init import discriminator_init, renderer_init, renderer_init2
 import cuda.emd.emd_module as emd
 from cuda.chamfer_distance import ChamferDistance, ChamferDistanceMean
 from runners.misc import AverageMeter
@@ -36,7 +36,7 @@ class mviewnetGANRunner(BaseRunner):
 
     def build_models(self):
         super().build_models()      # 这里是对netG的初始化
-        self.renderer_dis = renderer_init(self.config)      # 初始化渲染器
+        self.renderer_dis, self.renderer_gen = renderer_init2(self.config)      # 初始化渲染器
         self.models_D, self.optimizers_D, self.lr_schedulers_D = discriminator_init(self.config)        # 初始化netD
 
     def data_parallel(self):
@@ -46,6 +46,9 @@ class mviewnetGANRunner(BaseRunner):
         )
         self.renderer_dis = torch.nn.DataParallel(
             self.renderer_dis.to(self.gpu_ids[0]), device_ids=self.gpu_ids
+        )
+        self.renderer_gen = torch.nn.DataParallel(
+            self.renderer_gen.to(self.gpu_ids[0]), device_ids=self.gpu_ids
         )
 
     def build_train_loss(self):
@@ -76,7 +79,7 @@ class mviewnetGANRunner(BaseRunner):
         labels = torch.tensor(labels, dtype=torch.long).to(self.gpu_ids[0])
 
         # 获取点云的gt和partial的深度图和3d坐标图
-        self.get_depth_image(data)
+        self.get_depth_image(data,code)
 
         # create GAN positive & negative labels
         _batch_size = data["partial_cloud"].size()[0]
@@ -151,7 +154,7 @@ class mviewnetGANRunner(BaseRunner):
             expansion_penalty,
             fake_maps,
             dec_inputs
-        ) = self.models(data, self.input_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
+        ) = self.models(data, self.real_point_imgs, code)        # image是torch.Size([2, 32, 256, 256])
 
         if self.config.NETWORK.metric == "chamfer":
             coarse_loss = self.chamfer_dist_mean(coarse_ptcloud, data["gtcloud"]).mean()
@@ -257,15 +260,16 @@ class mviewnetGANRunner(BaseRunner):
         real_render_point_imgs_dict = {}
         input_render_point_imgs_dict = {}
         random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
-        random_view_ids = list(range(0, N_VIEWS_PREDEFINED, 1))  # 随机视角ID  从0到7
+        random_radius = 1
+        random_view_ids = list(range(0, N_VIEWS_PREDEFINED_GEN, 1))  # 随机视角ID  从0到7
 
         for _view_id in random_view_ids:
-            partial_img, input_index = self.renderer_dis(data["partial_cloud"], view_id=_view_id,
+            partial_img, input_index = self.renderer_gen(data["partial_cloud"], view_id=_view_id,
                                                          radius_list=[random_radius])
             partial_mask = (partial_img != 0)
             input_render_point_imgs_dict[_view_id] = self.index2point(input_index, data["partial_cloud"], partial_mask)
 
-            gt_img, real_index = self.renderer_dis(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
+            gt_img, real_index = self.renderer_gen(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
             gt_mask = (gt_img != 0)
             real_render_point_imgs_dict[_view_id] = self.index2point(real_index, data["gtcloud"], gt_mask)
 
@@ -292,9 +296,9 @@ class mviewnetGANRunner(BaseRunner):
         self.real_point_imgs = real_render_point_imgs_dict[_view_id]
         for _index in range(1, len(random_view_ids)):  # 对每个点云将8个视图concat起来，最终real_imgs等变为2*8*256*256
             _view_id = random_view_ids[_index]
-            self.input_point_imgs = torch.cat(
-                (self.input_point_imgs, input_render_point_imgs_dict[_view_id]), dim=1
-            ).to(self.gpu_ids[0])
+            # self.input_point_imgs = torch.cat(
+            #     (self.input_point_imgs, input_render_point_imgs_dict[_view_id]), dim=1
+            # ).to(self.gpu_ids[0])
             self.real_point_imgs = torch.cat(
                 (self.real_point_imgs, real_render_point_imgs_dict[_view_id]), dim=1
             ).to(self.gpu_ids[0])

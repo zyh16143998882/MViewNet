@@ -18,6 +18,9 @@ def get_args_from_command_line():
     # choose test mode
     parser.add_argument("--test_mode", default="default", help="default, vis, render, kitti", type=str)
 
+    # choose pretrain model
+    parser.add_argument("--pretrain", dest="pretrain", help="Initialize network from the weights file", default=None)
+
     # choose load model
     parser.add_argument("--weights", dest="weights", help="Initialize network from the weights file", default="/data/zhayaohua/project/pccomplection/PCF2dNet_0227/checkpoint/ckpt-best.pth")
 

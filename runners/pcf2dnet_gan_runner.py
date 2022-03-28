@@ -1,19 +1,21 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-
+import functools
 import os
 import torch
 import random
 import logging
 from time import time
 import utils.misc as um
+from models.unet import PCF2dUnetEncoder
 from utils.p2i_utils import N_VIEWS_PREDEFINED, N_VIEWS_PREDEFINED_GEN
-from utils.model_init import discriminator_init, renderer_init
+from utils.model_init import discriminator_init, renderer_init, renderer_init2
 import cuda.emd.emd_module as emd
 from cuda.chamfer_distance import ChamferDistance, ChamferDistanceMean
 from runners.misc import AverageMeter
 from runners.base_runner import BaseRunner
-from torch import distributed as dist
+from torch import distributed as dist, nn
+
 
 class pcf2dnetGANRunner(BaseRunner):
     """Define the SpareNet GAN runner class"""
@@ -21,10 +23,10 @@ class pcf2dnetGANRunner(BaseRunner):
     def __init__(self, config, logger):
         super().__init__(config, logger)        # 先调baserunner的初始化方法
         self.losses = AverageMeter(
-            ["CoarseLoss", "RefineLoss", "errG", "errG_D"]
+            ["CoarseLoss", "RefineLoss", "errG"]
         )
         self.test_losses = AverageMeter(
-            ["CoarseLoss", "RefineLoss", "errG", "errG_D"]
+            ["CoarseLoss", "RefineLoss", "errG"]
         )
         self.test_metrics = AverageMeter(um.Metrics.names())
         self.chamfer_dist = None
@@ -34,19 +36,20 @@ class pcf2dnetGANRunner(BaseRunner):
 
     def build_models(self):
         super().build_models()      # 这里是对netG的初始化
-        self.renderer_gen, self.renderer_dis = renderer_init(self.config)      # 初始化渲染器
-        self.models_D, self.optimizers_D, self.lr_schedulers_D = discriminator_init(self.config)        # 初始化netD
+        self.model_enc = PCF2dUnetEncoder(1, 64, norm_layer=functools.partial(nn.InstanceNorm2d, affine=True, track_running_stats=False),use_spectral_norm=False)
+
+    def models_load(self):
+        """Load models"""
+        self.model_enc.load_state_dict(torch.load("/data/zhayaohua/project/inpainting/my_unet.pth"))
+        for name, para in self.model_enc.named_parameters():
+            # 全部冻结
+            para.requires_grad = False
+
 
     def data_parallel(self):
         super().data_parallel()
-        self.models_D = torch.nn.DataParallel(
-            self.models_D.to(self.gpu_ids[0]), device_ids=self.gpu_ids
-        )
-        self.renderer_gen = torch.nn.DataParallel(
-            self.renderer_gen.to(self.gpu_ids[0]), device_ids=self.gpu_ids
-        )
-        self.renderer_dis = torch.nn.DataParallel(
-            self.renderer_dis.to(self.gpu_ids[0]), device_ids=self.gpu_ids
+        self.model_enc = torch.nn.DataParallel(
+            self.model_enc.to(self.gpu_ids[0]), device_ids=self.gpu_ids
         )
 
     def build_train_loss(self):
@@ -59,6 +62,9 @@ class pcf2dnetGANRunner(BaseRunner):
         )
         self.emd_dist = torch.nn.DataParallel(
             emd.emdModule().to(self.gpu_ids[0]), device_ids=self.gpu_ids
+        )
+        self.feature_l1 = torch.nn.DataParallel(
+            torch.nn.L1Loss().to(self.gpu_ids[0]), device_ids=self.gpu_ids
         )
 
     def build_val_loss(self):
@@ -86,43 +92,17 @@ class pcf2dnetGANRunner(BaseRunner):
         self.partial_imgs = data["mview_partial"]
         self.gt_imgs = data["mview_gt"]
 
-        # create GAN positive & negative labels
-        _batch_size = data["partial_cloud"].size()[0]
-        self.real_label = (                         # 全部填1，大小batch_size
-            torch.FloatTensor(_batch_size)
-                .resize_([_batch_size, 1])
-                .data.fill_(1)
-                .to(self.gpu_ids[0])
-        )
-        self.fake_label = (                         # 全部填0，大小batch_size
-            torch.FloatTensor(_batch_size)
-                .resize_([_batch_size, 1])
-                .data.fill_(0)
-                .to(self.gpu_ids[0])
-        )
 
         # run the completion network
-        if self.models.module.use_RecuRefine == True:
-            _loss, _, middle_ptcloud, _, refine_loss, coarse_loss, feature_loss = self.completion(data)       # 这里completion和sparenet_runner的completion函数一模一样，只不过middle_ptcloud必须获取
-        else:
-            _loss, _, middle_ptcloud, _, refine_loss, coarse_loss, feature_loss = self.completion_wo_recurefine(data, code)   # 这里completion和sparenet_runner的completion函数一模一样，只不过middle_ptcloud必须获取
+        _loss, _, middle_ptcloud, _, refine_loss, coarse_loss = self.completion_wo_recurefine(data, code)   # 这里completion和sparenet_runner的completion函数一模一样，只不过middle_ptcloud必须获取
         rec_loss = _loss
-        rendered_ptcloud = middle_ptcloud
 
-        # 多卡的loss取均值
-        feature_loss = torch.mean(feature_loss)
-
-        # 在pcf2dnet中不要discriminator_backward的loss
-        # errD_real, errD_fake = self.discriminator_backward(  # labels是items[1][1]
-        #     data, labels, rendered_ptcloud
-        # )
-        errG, errG_D = self.generator_backward(data, labels, rec_loss, feature_loss)
+        errG  = self.generator_backward(rec_loss)
 
         self.loss["coarse_loss"] = coarse_loss * 1000
         self.loss["refine_loss"] = refine_loss * 1000
         self.loss["rec_loss"] = _loss
         self.loss["errG"] = errG
-        self.loss["errG_D"] = errG_D
         # self.loss["errD_real"] = 0
         # self.loss["errD_fake"] = 0
 
@@ -131,7 +111,7 @@ class pcf2dnetGANRunner(BaseRunner):
                 coarse_loss.item() * 1000,
                 refine_loss.item() * 1000,
                 errG.item(),
-                errG_D.item(),
+                # refine_loss.item(),
                 # errD_real.item(),
                 # errD_fake.item(),
                 ]
@@ -163,8 +143,8 @@ class pcf2dnetGANRunner(BaseRunner):
             middle_ptcloud,
             refine_ptcloud,
             expansion_penalty,
-            feature_loss,
-        ) = self.models(data, self.partial_imgs, self.gt_imgs, code)        # image是torch.Size([2, 32, 256, 256])
+            x,
+        ) = self.models(data, self.partial_imgs, code)        # image是torch.Size([2, 32, 256, 256])
 
         if self.config.NETWORK.metric == "chamfer":
             coarse_loss = self.chamfer_dist_mean(coarse_ptcloud, data["gtcloud"]).mean()
@@ -189,7 +169,16 @@ class pcf2dnetGANRunner(BaseRunner):
             raise Exception("unknown training metric")
 
         # _loss = coarse_loss + middle_loss + refine_loss + expansion_penalty.mean() * 0.1
-        _loss = coarse_loss + middle_loss + expansion_penalty.mean() * 0.1
+        x_gt = []
+        for i in range(self.config.NETWORK.n_primitives):
+            temp = self.gt_imgs[:,i,:,:].unsqueeze(dim=1)
+            temp = self.model_enc(temp)
+            x_gt.append(temp.unsqueeze(dim=1))
+        x_gt = torch.cat(x_gt, 1).contiguous()
+
+        feature_loss = self.feature_l1(x,x_gt)
+
+        _loss = coarse_loss + middle_loss + expansion_penalty.mean() * 0.1 + feature_loss.mean() * 10
 
         if self.config.NETWORK.use_consist_loss:
             dist1, _ = self.chamfer_dist(middle_ptcloud, data["gtcloud"])
@@ -203,7 +192,6 @@ class pcf2dnetGANRunner(BaseRunner):
             coarse_ptcloud,
             middle_loss,
             coarse_loss,
-            feature_loss,
         )
     def completion(self, data):
         """
@@ -372,7 +360,7 @@ class pcf2dnetGANRunner(BaseRunner):
         self.optimizers_D.step()
         return errD_real, errD_fake
 
-    def generator_backward(self, data, labels, rec_loss, feature_loss):
+    def generator_backward(self, rec_loss):
         """
         inputs:
             data: tensor
@@ -390,58 +378,9 @@ class pcf2dnetGANRunner(BaseRunner):
         """
         self.optimizers.zero_grad()
 
-        errG_D = feature_loss
-        loss_fm = 0.0
-        loss_im = 0.0
-
-        # if self.config.GAN.use_fm:  # get feature matching
-        #     if self.config.GAN.use_cgan:
-        #         D_fake_pred, D_fake_features = self.models_D(       # 这里返回预测结果和每层的特征
-        #             torch.cat((self.input_imgs, self.fake_imgs), dim=1),
-        #             feat=True,
-        #             y=labels,
-        #         )
-        #         _, D_real_features = self.models_D(
-        #             torch.cat((self.input_imgs, self.real_imgs), dim=1),
-        #             feat=True,
-        #             y=labels,
-        #         )
-        #
-        #     else:
-        #         # Calculate output of image discriminator (PatchGAN)
-        #         D_fake_pred, D_fake_features = self.models_D(
-        #             torch.cat((self.input_imgs, self.fake_imgs), dim=1), feat=True
-        #         )
-        #         _, D_real_features = self.models_D(
-        #             torch.cat((self.input_imgs, self.real_imgs), dim=1), feat=True
-        #         )
-        #
-        #     # Feature match loss is weighted by number of feature maps
-        #     map_nums = [feat.shape[1] for feat in D_fake_features]
-        #     feat_weights = [float(i) / sum(map_nums) for i in map_nums]
-        #     for j in range(
-        #             len(D_fake_features)
-        #     ):  # the final loss is the sum of all features
-        #         loss_fm += feat_weights[j] * torch.mean(
-        #             (D_fake_features[j] - D_real_features[j].detach()) ** 2
-        #         )
-        # else:
-        #     if self.config.GAN.use_cgan:
-        #         D_fake_pred = self.models_D(
-        #             torch.cat((self.input_imgs, self.fake_imgs), dim=1), y=labels
-        #         )
-        #     else:
-        #         # Calculate output of image discriminator (PatchGAN)
-        #         D_fake_pred = self.models_D(
-        #             torch.cat((self.input_imgs, self.fake_imgs), dim=1)
-        #         )
-        # errG_D += self.criterionD(D_fake_pred, self.real_label)
-        #
-        # if self.config.GAN.use_im:  # Get image matching (L1_loss)
-        #     loss_im += torch.nn.L1Loss()(self.fake_imgs, self.real_imgs.detach())           # 图片上的损失
 
         errG = (
-                self.config.GAN.weight_l2 * rec_loss + self.config.GAN.weight_gan * errG_D
+                self.config.GAN.weight_l2 * rec_loss
         )
         # the sum of recloss and GAN_loss (and feature matching and image matching)
         # if self.config.GAN.use_fm:
@@ -451,4 +390,4 @@ class pcf2dnetGANRunner(BaseRunner):
         errG.backward()
         self.optimizers.step()
 
-        return errG, errG_D
+        return errG

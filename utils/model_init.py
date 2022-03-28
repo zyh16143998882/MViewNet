@@ -185,6 +185,10 @@ def define_G(cfg):
             decode=cfg.NETWORK.decode,
             hide_size=4096,
         )
+    elif cfg.NETWORK.model_type == name.MODEL_GRNET:
+        from models.grnet_generator import GRNet
+
+        network = GRNet(cfg)
     else:
         raise Exception("Unknown model type")
     return network

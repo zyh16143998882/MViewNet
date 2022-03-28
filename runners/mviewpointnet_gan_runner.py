@@ -249,19 +249,21 @@ class mviewpointnetGANRunner(BaseRunner):
             coarse_loss,
         )
 
-    def get_depth_image(self, data):
+    def get_depth_image(self, data, code="default"):
         real_render_point_imgs_dict = {}
         input_render_point_imgs_dict = {}
-        real_render_single_point_imgs_dict = {}
         random_radius = random.sample(self.config.RENDER.radius_list, 1)[0]  # 随机半径
-        random_view_ids = list(range(0, N_VIEWS_PREDEFINED, 1))  # 随机视角ID  从0到7
+        random_view_ids = list(range(0, N_VIEWS_PREDEFINED_GEN, 1))  # 随机视角ID  从0到7
 
         for _view_id in random_view_ids:
-            _, input_index = self.renderer_dis(data["partial_cloud"], view_id=_view_id, radius_list=[random_radius])
-            input_render_point_imgs_dict[_view_id] = self.index2point(input_index,data["partial_cloud"])
+            partial_img, input_index = self.renderer_gen(data["partial_cloud"], view_id=_view_id,
+                                                         radius_list=[random_radius])
+            partial_mask = (partial_img != 0)
+            input_render_point_imgs_dict[_view_id] = self.index2point(input_index, data["partial_cloud"], partial_mask)
 
-            _, real_index = self.renderer_dis(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
-            real_render_point_imgs_dict[_view_id] = self.index2point(real_index, data["gtcloud"])
+            gt_img, real_index = self.renderer_gen(data["gtcloud"], view_id=_view_id, radius_list=[random_radius])
+            gt_mask = (gt_img != 0)
+            real_render_point_imgs_dict[_view_id] = self.index2point(real_index, data["gtcloud"], gt_mask)
 
         _view_id = random_view_ids[0]
         self.input_point_imgs = input_render_point_imgs_dict[_view_id]
@@ -275,32 +277,36 @@ class mviewpointnetGANRunner(BaseRunner):
                 (self.real_point_imgs, real_render_point_imgs_dict[_view_id]), dim=1
             ).to(self.gpu_ids[0])
 
-    def index2point(self, index_img, data):
+    def index2point(self, index_img, data, mask):
         # for循环解决多个batch的问题
         # temp解决index的shape的问题
         # mask解决index值为-1的问题
         size = index_img.size()
-        mask = (index_img != -1)
         index_img = index_img * mask
-        index_img = index_img.permute(0,2,3,1)
-        index_img = index_img.expand(size[0], size[2], size[3], size[1]*3)
-        mask = mask.permute(0,2,3,1)
-        mask = mask.expand(size[0], size[2], size[3], size[1]*3)
+        index_img = index_img.permute(0, 2, 3, 1)
+        index_img = index_img.expand(size[0], size[2], size[3], size[1] * 3)
+        mask = mask.permute(0, 2, 3, 1)
+        mask = mask.expand(size[0], size[2], size[3], size[1] * 3)
 
         res = self.index2point_perchannel(index_img, mask, data, 0)
-        for i in range(1,size[0]):
+        for i in range(1, size[0]):
             res = torch.cat((res, self.index2point_perchannel(index_img, mask, data, i)), dim=0)
 
         # 这里的view是极其错误的 res.contiguous().view(res.size()[0],1,res.size()[3],res.size()[1],res.size()[2])
         # 添加一维用unsqueeze，维度转换用permute
-        res = res.permute(0,3,1,2)      # torch.Size([4, 128, 128, 3]) --> torch.Size([4, 3, 128, 128])
-        res = torch.unsqueeze(res, 1)   # torch.Size([4, 3, 128, 128]) --> torch.Size([4, 1, 3, 128, 128])
+        res = res.permute(0, 3, 1, 2)  # torch.Size([4, 128, 128, 3]) --> torch.Size([4, 3, 128, 128])
+        res = torch.unsqueeze(res, 1)  # torch.Size([4, 3, 128, 128]) --> torch.Size([4, 1, 3, 128, 128])
         return res
 
-    def index2point_perchannel(self,index_img,mask,data,i):
-        temp = index_img[i,:,:,:]
-        mask_temp = mask[i,:,:,:]
-        data_temp = data[i,:,:]
+    def index2point_perchannel(self, index_img, mask, data, i):
+        temp = index_img[i, :, :, :]
+        mask_temp = mask[i, :, :, :]
+        data_temp = data[i, :, :]
+
+        # 将无效点转化为-1，而非0，因为像素点的范围在[-1,1]之间，如果是0的话是有实际的像素意义的，-1是255中的0
+        ones = torch.ones(mask_temp.size()).to(self.gpu_ids[0])
+        bais = ones * mask_temp
+        bais = (ones - bais) * (-1)
 
         temp = temp % 3000
 
@@ -308,6 +314,7 @@ class mviewpointnetGANRunner(BaseRunner):
         temp = temp.contiguous().view(size[0] * size[1], size[2]).long()
         temp = torch.gather(data_temp, 0, temp)
         temp = temp.contiguous().view(size) * mask_temp
+        temp = temp + bais
         temp = torch.unsqueeze(temp, 0)
         return temp
 

@@ -49,7 +49,7 @@ def data_init(cfg):
     else:
         val_data_loader = torch.utils.data.DataLoader(
             dataset=test_dataset_loader.get_dataset(DatasetSubset.TEST),
-            batch_size=48,
+            batch_size=75,
             num_workers=cfg.CONST.num_workers,
             collate_fn=collate_fn,
             pin_memory=True,

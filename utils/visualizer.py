@@ -23,6 +23,9 @@ VIS_PATH_PARTIAL = './output/vis/partial/'
 VIS_REAL_PATH_POINT = './output/vis/realpoint/'
 VIS_INPUT_PATH_POINT = './output/vis/inputpoint/'
 VISUALIZER = False
+
+MASK_IMG = True
+VIS_PATH_MASK = './output/vis/mask/'
 if VISUALIZER_PC == True:
     if not os.path.isdir(VIS_PATH_PC):
         os.makedirs(VIS_PATH_PC)
@@ -37,6 +40,11 @@ if VISUALIZER_PRE == True:
         os.makedirs(VIS_PATH_PARTIAL)
     if not os.path.isdir(VIS_PATH_GT):
         os.makedirs(VIS_PATH_GT)
+
+if MASK_IMG == True:
+    if not os.path.isdir(VIS_PATH_MASK):
+        os.makedirs(VIS_PATH_MASK)
+
 
 # b c n
 def get_ptcloud_img(ptcloud):
