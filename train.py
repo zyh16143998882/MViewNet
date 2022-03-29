@@ -13,7 +13,7 @@ def get_args_from_command_line():
     parser = argparse.ArgumentParser(description="The argument parser of R2Net runner")
 
     # choose model
-    parser.add_argument("--model", type=str, default="grnet", help="sparenet, pcf2dnet, mviewnet, mviewpointnet, inpaintingnet,grnet")
+    parser.add_argument("--model", type=str, default="inpaintingnet", help="sparenet, pcf2dnet, mviewnet, mviewpointnet, inpaintingnet, grnet")
 
     # choose train mode
     parser.add_argument("--gan", dest="gan", help="use gan", action="store_true", default=False)
@@ -33,6 +33,9 @@ def get_args_from_command_line():
 
     # setup workdir
     parser.add_argument("--workdir", dest="workdir", help="where to save files", default=None)
+
+    # choose use RecurRefine
+    parser.add_argument("--refine", dest="refine", help="use recur refine", action="store_true", default=False)
     return parser.parse_args()
 
 
@@ -52,6 +55,7 @@ def main():
         cfg_from_file("configs/" + args.model + ".yaml")        # 从配置文件加载配置
     output_dir = cfg_update(args)                               # 在cfg中写超参
     cfg.TRAIN.batch_size = args.batch_size  # 设置batch size
+    cfg.NETWORK.use_recurefine = args.refine
 
     # Set up folders for logs and checkpoints
     if not os.path.exists(cfg.DIR.logs):
@@ -72,6 +76,7 @@ def main():
         module = getattr(runners, args.model + "_runner")
         model = getattr(module, args.model + "Runner")(cfg, logger)
     model.config["TRAIN"].batch_size = args.batch_size
+    print(model.config["NETWORK"].use_recurefine)
 
     model.runner()                                                      # 模型启动
 

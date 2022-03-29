@@ -157,11 +157,11 @@ def print_table(
     #     log_table["overall" + "_" + m] = "%.6f" % test_metrics.avg(i)
 
     # Add testing results to TensorBoard
-    if test_writer is not None:
-        test_writer.add_scalar("Loss/Epoch/Sparse", test_losses.avg(0), epoch_idx)
-        test_writer.add_scalar("Loss/Epoch/Dense", test_losses.avg(1), epoch_idx)
-        for i, metric in enumerate(test_metrics.items):
-            test_writer.add_scalar("Metric/%s" % metric, test_metrics.avg(i), epoch_idx)
+    # if test_writer is not None:
+    #     test_writer.add_scalar("Loss/Epoch/Sparse", test_losses.avg(0), epoch_idx)
+    #     test_writer.add_scalar("Loss/Epoch/Dense", test_losses.avg(1), epoch_idx)
+    #     for i, metric in enumerate(test_metrics.items):
+    #         test_writer.add_scalar("Metric/%s" % metric, test_metrics.avg(i), epoch_idx)
 
     with open(os.path.join(cfg.DIR.logs, "test.txt"), "a") as f:
         f.write("json_stats: " + json.dumps(log_table) + "\n")

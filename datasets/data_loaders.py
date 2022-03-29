@@ -131,11 +131,10 @@ class Dataset(torch.utils.data.dataset.Dataset):
             file_path = sample["%s_path" % ri]          # 获取partial_cloud_path或者gtcloud_path，所以这里可以加上mview_path
 
             if ri == "mview" or ri == "mview_partial" or ri == "mview_gt":
-                data[ri] = self.img_transforms(Image.open(file_path[0]).convert("L"))
-                for i in range(1,len(file_path)):
-                    data[ri] = torch.cat(
-                        (data[ri], self.img_transforms(Image.open(file_path[i]).convert("L"))), dim=0
-                    )
+                temp = []
+                for i in range(len(file_path)):
+                    temp.append(self.img_transforms(Image.open(file_path[i])).unsqueeze(dim=0))
+                data[ri] = torch.cat(temp, 0).contiguous()
             elif ri == "partial_cloud":
                 file_path = file_path[rand_idx]         # 随机取一个
                 data[ri] = IO.get(file_path).astype(np.float32)
@@ -251,7 +250,7 @@ class MviewShapeNetDataLoader(object):
                             % (subset, dc["taxonomy_id"], s),
                             "mview_path": [
                                 (cfg.DATASETS.shapenet.train_img_path if subset == "train" else cfg.DATASETS.shapenet.test_img_path)
-                                % (dc["taxonomy_id"],str(label),s,i) for i in range(32)],
+                                % (dc["taxonomy_id"],str(label),s,i) for i in range(cfg.NETWORK.n_primitives)],
                         }
                     )
 
@@ -385,10 +384,10 @@ class Mview2ShapeNetDataLoader(object):
                             % (subset, dc["taxonomy_id"], s),
                             "mview_partial_path": [
                                 (cfg.DATASETS.shapenet.train_img_path if subset == "train" else cfg.DATASETS.shapenet.test_img_path)
-                                % (dc["taxonomy_id"],str(label),s,i) for i in range(32)],
+                                % (dc["taxonomy_id"],str(label),s,i) for i in range(cfg.NETWORK.n_primitives)],
                             "mview_gt_path": [
                                 (train_path if subset == "train" else test_path)
-                                % (dc["taxonomy_id"], str(label), s, i) for i in range(32)],
+                                % (dc["taxonomy_id"], str(label), s, i) for i in range(cfg.NETWORK.n_primitives)],
                         }
                     )
 

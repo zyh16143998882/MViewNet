@@ -25,6 +25,7 @@ def generator_init(cfg):
     """
     # Create the networks
     net_G = define_G(cfg)
+    print(net_G)
     net_G.apply(init_weights)               # 从初始值开始初始化权重
     logger.debug("Parameters in net_G: %d." % count_parameters(net_G))
 
@@ -171,7 +172,7 @@ def define_G(cfg):
             hide_size=4096,
         )
     elif cfg.NETWORK.model_type == name.MODEL_INPAINTINGNET:
-        from models.sparenet_generator import InpaintingNetGenerator
+        from models.inpaintingnet_generator import InpaintingNetGenerator
 
         # from models.mvnet import MVNet
         network = InpaintingNetGenerator(

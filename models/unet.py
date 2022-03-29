@@ -167,41 +167,6 @@ class UnetGanEncoder(nn.Module):
 
         return x
 
-# class EasyUnetGenerator(nn.Module):
-#     def __init__(self, input_nc, output_nc, ngf=64,
-#                  norm_layer=nn.BatchNorm2d, use_spectral_norm=False):
-#         super(EasyUnetGenerator, self).__init__()
-#         self.e1_c = spectral_norm(nn.Conv2d(ngf*8, ngf*8, kernel_size=3, stride=1, padding=1), use_spectral_norm)
-#         self.e2_c = spectral_norm(nn.Conv2d(ngf*8, ngf*8, kernel_size=3, stride=1, padding=1), use_spectral_norm)
-#         self.e2_norm = norm_layer(ngf * 8)
-#         self.e3_c = spectral_norm(nn.Conv2d(ngf*8, ngf*16, kernel_size=3, stride=1, padding=1), use_spectral_norm)
-#         self.e3_norm = norm_layer(ngf * 16)
-#         self.e4_c = spectral_norm(nn.Conv2d(ngf*16, ngf*16, kernel_size=4, stride=2, padding=1), use_spectral_norm)
-#
-#         self.d1_c = spectral_norm(nn.ConvTranspose2d(ngf * 16, ngf * 16, kernel_size=4, stride=2, padding=1), use_spectral_norm)
-#         self.d1_norm = norm_layer(ngf * 16)
-#         self.d2_c = spectral_norm(nn.ConvTranspose2d(ngf * 16 * 2, ngf * 8, kernel_size=3, stride=1, padding=1),use_spectral_norm)
-#         self.d2_norm = norm_layer(ngf * 8)
-#         self.d3_c = spectral_norm(nn.ConvTranspose2d(ngf * 8 * 2, ngf * 8, kernel_size=3, stride=1, padding=1),use_spectral_norm)
-#         self.d3_norm = norm_layer(ngf * 8)
-#         self.d4_c = spectral_norm(nn.ConvTranspose2d(ngf * 8 * 2, ngf * 8, kernel_size=3, stride=1, padding=1),use_spectral_norm)
-#
-#     # In this case, we have very flexible unet construction mode.
-#     def forward(self, input):
-#         # Encoder
-#         e1 = self.e1_c(input)
-#         e2 = self.e2_norm(self.e2_c(F.leaky_relu_(e1, negative_slope=0.2)))
-#         e3 = self.e3_norm(self.e3_c(F.leaky_relu_(e2, negative_slope=0.2)))
-#         e4 = self.e4_c(F.leaky_relu_(e3, negative_slope=0.2))
-#         # Decoder
-#         d1 = self.d1_norm(self.d1_c(F.relu_(e4)))
-#         d2 = self.d2_norm(self.d2_c(F.relu_(torch.cat([d1, e3], dim=1))))
-#         d3 = self.d3_norm(self.d3_c(F.relu_(torch.cat([d2, e2], dim=1))))
-#         d4 = self.d4_c(F.relu_(torch.cat([d3, e1], 1)))
-#
-#         d4 = F.sigmoid(d4)
-#
-#         return d4
 
 # class EasyUnetGenerator(nn.Module):
 #     def __init__(self, input_nc, output_nc, ngf=64,
